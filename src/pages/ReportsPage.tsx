@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { motion } from "framer-motion";
+import { BarChart3 } from "lucide-react";
 import { useReportStore } from "@/stores/reportStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { startOfWeek, endOfWeek } from "date-fns";
@@ -8,6 +9,7 @@ import StatsRow from "@/components/reports/StatsRow";
 import TimeByListChart from "@/components/reports/TimeByListChart";
 import TasksPerDayChart from "@/components/reports/TasksPerDayChart";
 import SessionHistoryTable from "@/components/reports/SessionHistoryTable";
+import EmptyState from "@/components/layout/EmptyState";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 12 },
@@ -23,6 +25,8 @@ export default function ReportsPage() {
   const isLoaded = useReportStore((s) => s.isLoaded);
   const dateRangeFrom = useReportStore((s) => s.dateRange.from);
   const weekStart = useSettingsStore((s) => s.weekStart) as 0 | 1;
+  const totalFocusMinutes = useReportStore((s) => s.stats.totalFocusMinutes);
+  const tasksCompleted = useReportStore((s) => s.stats.tasksCompleted);
 
   useEffect(() => {
     if (!dateRangeFrom) {
@@ -63,22 +67,35 @@ export default function ReportsPage() {
         <StatsRow />
       </motion.div>
 
-      {/* Charts */}
-      <motion.div
-        variants={fadeUp}
-        initial="hidden"
-        animate="visible"
-        custom={3}
-        className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-      >
-        <TimeByListChart />
-        <TasksPerDayChart />
-      </motion.div>
+      {/* Empty state when no activity */}
+      {isLoaded && totalFocusMinutes === 0 && tasksCompleted === 0 ? (
+        <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={3}>
+          <EmptyState
+            icon={<BarChart3 size={40} />}
+            title="No activity yet"
+            description="Complete a focus session to see your reports"
+          />
+        </motion.div>
+      ) : (
+        <>
+          {/* Charts */}
+          <motion.div
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
+            custom={3}
+            className="grid grid-cols-1 lg:grid-cols-2 gap-6"
+          >
+            <TimeByListChart />
+            <TasksPerDayChart />
+          </motion.div>
 
-      {/* Session History */}
-      <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={4}>
-        <SessionHistoryTable />
-      </motion.div>
+          {/* Session History */}
+          <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={4}>
+            <SessionHistoryTable />
+          </motion.div>
+        </>
+      )}
 
       {/* Print styles handled via Tailwind print: variants */}
       <style>{`

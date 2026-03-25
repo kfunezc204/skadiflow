@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { motion } from "framer-motion";
 import MiniTimer from "@/components/focus/MiniTimer";
 import { NavLink } from "react-router-dom";
 import {
@@ -112,8 +113,14 @@ export default function Sidebar() {
         </button>
 
         {/* Dynamic lists */}
-        {lists.map((list) => (
-          <div key={list.id} className="group flex items-center">
+        {lists.map((list, i) => (
+          <motion.div
+            key={list.id}
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.04, duration: 0.2 }}
+            className="group flex items-center"
+          >
             <button
               onClick={() => selectList(list.id)}
               className={`flex flex-1 items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors min-w-0 ${
@@ -152,7 +159,7 @@ export default function Sidebar() {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
+          </motion.div>
         ))}
 
         <Separator className="my-4 bg-[#2A2A2A]" />

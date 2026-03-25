@@ -1,9 +1,12 @@
 import { useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { ClipboardList } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TaskCard from "./TaskCard";
 import InlineTaskAdd from "./InlineTaskAdd";
+import EmptyState from "@/components/layout/EmptyState";
 import { type Task, type TaskStatus } from "@/stores/taskStore";
 
 type Props = {
@@ -54,14 +57,31 @@ export default function KanbanColumn({ status, title, tasks, accentColor }: Prop
             strategy={verticalListSortingStrategy}
           >
             <div className="flex flex-col gap-2 p-2">
-              {tasks.map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  columnStatus={status}
-                  columnTasks={tasks}
+              {tasks.length === 0 && (
+                <EmptyState
+                  icon={<ClipboardList size={32} />}
+                  title="No tasks yet"
+                  description="Add a task below"
                 />
-              ))}
+              )}
+              <AnimatePresence initial={false}>
+                {tasks.map((task) => (
+                  <motion.div
+                    key={task.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <TaskCard
+                      task={task}
+                      columnStatus={status}
+                      columnTasks={tasks}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
               <InlineTaskAdd status={status} />
             </div>
           </SortableContext>

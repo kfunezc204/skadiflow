@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toast } from "@/lib/toast";
 import {
   getAllBlockerProfiles,
   createBlockerProfile as dbCreateBlockerProfile,
@@ -63,8 +64,12 @@ export const useLockerStore = create<LockerState & LockerActions>((set, get) => 
     try {
       const result = await invoke<boolean>("check_locker_permission");
       set({ hasPermission: result });
+      if (!result) {
+        toast.error("Admin permission required for website blocker");
+      }
     } catch {
       set({ hasPermission: false });
+      toast.error("Admin permission required for website blocker");
     }
   },
 

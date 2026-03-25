@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTaskStore } from "@/stores/taskStore";
+import { toast } from "@/lib/toast";
 import {
   createSession as dbCreateSession,
   endSession as dbEndSession,
@@ -417,6 +418,8 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       "timer_active_session_id",
     ];
     await Promise.all(clearKeys.map((k) => setSetting(k, "").catch(() => {})));
+
+    toast("Focus session complete");
 
     set({
       phase: "focus",

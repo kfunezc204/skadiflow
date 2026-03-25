@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import { toast } from "@/lib/toast";
 import {
   getAllTasks,
   getDoneTasks,
@@ -137,6 +138,7 @@ export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
     const task = get().tasks.find((t) => t.id === id);
     if (!task) return null;
     await dbCompleteTask(id);
+    toast.success("Task completed!");
     set((state) => ({
       tasks: state.tasks.filter((t) => t.id !== id),
     }));

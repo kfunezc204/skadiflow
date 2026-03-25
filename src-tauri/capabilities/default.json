@@ -23,6 +23,12 @@
     "store:allow-values",
     "store:allow-entries",
     "store:allow-length",
-    "store:allow-reload"
+    "store:allow-reload",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus"
   ]
 }

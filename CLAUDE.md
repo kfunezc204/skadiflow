@@ -115,8 +115,9 @@ productivity-app/
 | `task_tags` | 001 | Many-to-many join between tasks and tags |
 | `blocker_profiles` | 002 | Named website blocklist profiles |
 | `blocker_domains` | 002 | Domains per profile; CASCADE delete on profile removal |
+| `tasks.parent_task_id` | 003 | Nullable FK column added to `tasks`; enables subtask hierarchy |
 
-Default "Inbox" list (`id: 'inbox-default'`) is seeded by migration 001. Migration 002 also seeds `locker_during_breaks = 'false'` into `settings`.
+Default "Inbox" list (`id: 'inbox-default'`) is seeded by migration 001. Migration 002 also seeds `locker_during_breaks = 'false'` into `settings`. Migration 003 adds `parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE` to `tasks` plus an index on that column.
 
 ### Zustand Store Pattern
 Each store exports a single `use*Store` hook. Stores separate state shape (`*State` type) from actions (`*Actions` type). All stores have an `isLoaded: boolean` flag. DB calls flow: **component → store action → `src/lib/db.ts` function → SQLite**. Never skip `db.ts`.
@@ -256,31 +257,80 @@ Update checkboxes here AND in `Plan.md` as tasks are completed.
 ---
 
 ### Milestone 5 — Settings, Polish & UX
-- [ ] Settings page (theme, Pomodoro, notifications, week start)
-- [ ] System tray (show/hide, quick add)
-- [ ] Global hotkeys (Ctrl+N, Ctrl+F, Ctrl+,)
-- [ ] Keyboard shortcut modal
-- [ ] Framer Motion animations
-- [ ] Onboarding flow (3-step modal)
-- [ ] Empty state illustrations
-- [ ] Toast notifications (Sonner)
-- [ ] Auto-updater
+- [x] Settings page (theme, Pomodoro, notifications, week start)
+- [x] System tray (show/hide, quick add)
+- [x] Global hotkeys (Ctrl+N, Ctrl+Shift+F, Ctrl+,)
+- [x] Keyboard shortcut modal
+- [x] Framer Motion animations
+- [x] Onboarding flow (3-step modal)
+- [x] Empty state illustrations
+- [x] Toast notifications (Sonner)
+- [ ] Auto-updater (deferred — requires code signing + update server infrastructure)
+
+**Status**: COMPLETE (auto-updater deferred)
+
+---
+
+### Milestone 6 — Subtasks
+- [ ] Migration `003_subtasks.sql`: `parent_task_id` column + index
+- [ ] Register migration in `lib.rs`
+- [ ] `getSubtasks`, `createSubtask`, `toggleSubtask`, `deleteSubtask`, `reorderSubtasks` in `db.ts`
+- [ ] `getAllTasks()` excludes subtasks (`WHERE parent_task_id IS NULL`)
+- [ ] `Task` type gains `parentTaskId: string | null`
+- [ ] `subtasks: Record<string, Task[]>` state + load/add/toggle/delete/reorder actions
+- [ ] `useSubtasks(parentId)` and `useSubtaskProgress(parentId)` selectors
+- [ ] `useTasksByColumn` filters out subtasks
+- [ ] Subtask progress badge on TaskCard ("2/5 ✓")
+- [ ] Subtask section in TaskDetailPanel (list, add, delete, reorder)
 
 **Status**: NOT STARTED
 
 ---
 
-### Milestone 6 — Integrations
+### Milestone 7 — List Filtering & All Lists View
+- [ ] `useTasksByColumn` reads `selectedListId` from listStore for filtering
+- [ ] Kanban board header shows current list name/icon or "All Tasks"
+- [ ] TaskCard shows list name label in "All Tasks" view
+- [ ] Sidebar: "All Tasks" active state, task counts per list
+- [ ] InlineTaskAdd: list picker dropdown when in "All Tasks" view
+
+**Status**: NOT STARTED
+
+---
+
+### Milestone 8 — Focus Mode Enhancements
+- [ ] `"floating-timer"` window in `tauri.conf.json` (340×88, always-on-top, transparent, hidden)
+- [ ] `floating-timer` in `capabilities/default.json` + drag/event permissions
+- [ ] `src/lib/timerBridge.ts` — cross-window Tauri event bridge
+- [ ] `timerStore` broadcasts state on tick; listens for actions from floating window
+- [ ] `src/components/focus/FloatingTimer.tsx` — compact draggable timer UI
+- [ ] `src/pages/FloatingTimerPage.tsx` — minimal page (no AppShell)
+- [ ] `/floating-timer` route in `App.tsx` outside `<AppShell>`
+- [ ] Focus session start → show floating window, hide main window
+- [ ] Session end / Expand → show main window, hide floating window
+- [ ] "Minimize to floating" button in FocusOverlay
+- [ ] `src/lib/urlUtils.ts` — URL extraction; auto-open on task activation
+- [ ] `autoOpenLinks` setting + Settings toggle + link display in FocusOverlay
+- [ ] `focusBackground` setting (dark/gradient-warm/gradient-cool/gradient-purple/nature)
+- [ ] Background picker in Settings; applied in FocusOverlay
+- [ ] `src/lib/audioManager.ts` + ambient sound assets in `public/sounds/`
+- [ ] `focusSound` / `focusSoundVolume` settings; sound selector in FocusOverlay + Settings
+
+**Status**: NOT STARTED
+
+---
+
+### Milestone 9 — Integrations
 - [ ] Notion OAuth + task import
 - [ ] Google Calendar OAuth + sync
 - [ ] Claude AI panel (brain dump, smart scheduling, voice-to-task)
 - [ ] API key storage (Tauri secure store)
 
-**Status**: NOT STARTED
+**Status**: DEFERRED — not required for MVP
 
 ---
 
-### Milestone 7 — Cloud Sync
+### Milestone 10 — Cloud Sync
 - [ ] Supabase project + schema
 - [ ] Auth (email + OAuth)
 - [ ] Conflict resolution
@@ -288,7 +338,7 @@ Update checkboxes here AND in `Plan.md` as tasks are completed.
 - [ ] Offline queue
 - [ ] Account UI
 
-**Status**: NOT STARTED
+**Status**: DEFERRED — not required for MVP
 
 ---
 
@@ -340,4 +390,4 @@ npm run tauri add sql
 
 ---
 
-*Last updated: 2026-03-25 (Milestone 4 complete — actual_minutes sync, manual time correction, reportStore, Reports page with charts/table/streak/PDF export)*
+*Last updated: 2026-03-25 (Milestones 6–8 added — Subtasks, List Filtering, Focus Mode Enhancements; M9/M10 are deferred Integrations/Cloud Sync)*

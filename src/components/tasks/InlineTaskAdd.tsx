@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -44,6 +44,32 @@ export default function InlineTaskAdd({ status }: Props) {
       setValue("");
     }
   }
+
+  // Listen for quick-add events (from tray or global shortcut) — only "today" column responds
+  useEffect(() => {
+    if (status !== "today") return;
+
+    // DOM custom event (from global shortcut hook)
+    function handleDomQuickAdd() {
+      openInput();
+    }
+    window.addEventListener("blitzdesk:quick-add", handleDomQuickAdd);
+
+    // Tauri event (from tray menu)
+    let unlisten: (() => void) | null = null;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen("quick-add", () => {
+        openInput();
+      }).then((fn) => {
+        unlisten = fn;
+      });
+    }).catch(() => {});
+
+    return () => {
+      window.removeEventListener("blitzdesk:quick-add", handleDomQuickAdd);
+      if (unlisten) unlisten();
+    };
+  }, [status]);
 
   return (
     <div className="mt-2">

@@ -1,6 +1,9 @@
 mod commands;
 
+use tauri::{Emitter, Manager};
 use tauri_plugin_sql::{Migration, MigrationKind};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::TrayIconEvent;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -29,15 +32,62 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::locker::check_locker_permission,
             commands::locker::activate_locker,
             commands::locker::deactivate_locker,
         ])
         .setup(|app| {
+            let show_hide = MenuItem::with_id(app, "show_hide", "Show / Hide", true, None::<&str>)?;
+            let quick_add = MenuItem::with_id(app, "quick_add", "Quick Add Task", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit BlitzDesk", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[
+                &show_hide,
+                &quick_add,
+                &PredefinedMenuItem::separator(app)?,
+                &quit,
+            ])?;
+
             let _tray = tauri::tray::TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("BlitzDesk")
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    let window = app.get_webview_window("main").unwrap();
+                    match event.id().as_ref() {
+                        "show_hide" => {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quick_add" => {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.emit("quick-add", ());
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
                 .build(app)?;
             Ok(())
         })

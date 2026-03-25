@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, ChevronUp, ChevronDown, ShieldCheck } from "lucide-react";
+import { Play, ChevronUp, ChevronDown, ShieldCheck, Timer as TimerIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTimerStore } from "@/stores/timerStore";
 import { useTaskStore, useTasksByColumn } from "@/stores/taskStore";
@@ -7,6 +7,7 @@ import { useLockerStore } from "@/stores/lockerStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import FocusOverlay from "@/components/focus/FocusOverlay";
 import LockerPanel from "@/components/focus/LockerPanel";
+import EmptyState from "@/components/layout/EmptyState";
 import { formatMinutes } from "@/lib/timeUtils";
 
 function TaskRow({
@@ -183,9 +184,12 @@ export default function FocusPage() {
             </div>
 
             {todayTasks.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-white/10 py-8 text-center">
-                <p className="text-sm text-white/30">No tasks in Today column.</p>
-                <p className="text-xs text-white/20 mt-1">Move tasks to Today on the Board first.</p>
+              <div className="rounded-lg border border-dashed border-white/10">
+                <EmptyState
+                  icon={<TimerIcon size={32} />}
+                  title="No tasks in Today"
+                  description="Move tasks to Today on the Board first."
+                />
               </div>
             ) : (
               <div className="flex flex-col gap-1.5">

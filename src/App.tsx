@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AppShell from "@/components/layout/AppShell";
+import OnboardingModal from "@/components/layout/OnboardingModal";
 import BoardPage from "@/pages/BoardPage";
 import FocusPage from "@/pages/FocusPage";
 import ReportsPage from "@/pages/ReportsPage";
@@ -11,6 +12,7 @@ import { useTimerStore } from "@/stores/timerStore";
 
 export default function App() {
   const isLoaded = useSettingsStore((s) => s.isLoaded);
+  const onboardingCompleted = useSettingsStore((s) => s.onboardingCompleted);
 
   // Empty deps: run once on mount via getState() — avoids Zustand v5 reference instability
   useEffect(() => {
@@ -32,6 +34,7 @@ export default function App() {
 
   return (
     <TooltipProvider>
+      {!onboardingCompleted && <OnboardingModal />}
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<BoardPage />} />
