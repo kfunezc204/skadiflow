@@ -17,7 +17,7 @@ export default function MiniTimer() {
 
   if (status === "idle") {
     return (
-      <p className="text-[10px] text-white/20 text-center">BlitzDesk v0.1</p>
+      <p className="text-[10px] text-white/20 text-center">SkadiFlow v0.1</p>
     );
   }
 

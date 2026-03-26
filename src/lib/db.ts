@@ -6,7 +6,7 @@ let _dbPromise: Promise<Database> | null = null;
 
 export function getDb(): Promise<Database> {
   if (!_dbPromise) {
-    _dbPromise = Database.load("sqlite:blitzdesk.db");
+    _dbPromise = Database.load("sqlite:skadiflow.db");
   }
   return _dbPromise;
 }

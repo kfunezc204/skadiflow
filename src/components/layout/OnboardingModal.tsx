@@ -40,7 +40,7 @@ export default function OnboardingModal() {
                   <Timer size={32} className="text-orange-500" />
                 </div>
               </div>
-              <h1 className="text-2xl font-bold text-white mb-2">Welcome to BlitzDesk</h1>
+              <h1 className="text-2xl font-bold text-white mb-2">Welcome to SkadiFlow</h1>
               <p className="text-sm text-white/50">
                 Your focused productivity workspace. Kanban boards, Pomodoro timer, and deep work — all in one place.
               </p>

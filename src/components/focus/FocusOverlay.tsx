@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Minimize2, Volume2, VolumeX, CheckCircle2, Circle } from "lucide-react";
+import { Minimize2, MonitorOff, Volume2, VolumeX, CheckCircle2, Circle, CloudRain, Coffee, Wind, Music, Waves, TreePine } from "lucide-react";
 import { useTimerStore } from "@/stores/timerStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTaskStore, type Task } from "@/stores/taskStore";
@@ -23,13 +23,14 @@ const FOCUS_BG: Record<string, string> = {
 
 const EMPTY_SUBTASKS: Task[] = [];
 
-const SOUND_LABELS: Record<string, string> = {
-  none: "No sound",
-  rain: "Rain",
-  cafe: "Cafe",
-  whitenoise: "White Noise",
-  lofi: "Lo-fi",
-};
+const SOUND_OPTIONS: { key: string; label: string; icon: React.ReactNode }[] = [
+  { key: "rain",       label: "Rain",        icon: <CloudRain size={13} /> },
+  { key: "cafe",       label: "Cafe",        icon: <Coffee size={13} /> },
+  { key: "whitenoise", label: "White Noise", icon: <Wind size={13} /> },
+  { key: "lofi",       label: "Lo-fi",       icon: <Music size={13} /> },
+  { key: "ocean",      label: "Ocean",       icon: <Waves size={13} /> },
+  { key: "forest",     label: "Forest",      icon: <TreePine size={13} /> },
+];
 
 type Props = {
   onExit: () => void;
@@ -42,7 +43,7 @@ export default function FocusOverlay({ onExit }: Props) {
   const totalSeconds = useTimerStore((s) => s.totalSeconds);
   const currentCycle = useTimerStore((s) => s.currentCycle);
   const activeTaskId = useTimerStore((s) => s.activeTaskId);
-  const activeLockerProfileId = useTimerStore((s) => s.activeLockerProfileId);
+  const isLockerEnabled = useTimerStore((s) => s.isLockerEnabled);
   const { pause, resume } = useTimerStore.getState();
 
   const cyclesBeforeLong = useSettingsStore((s) => s.pomodoroCyclesBeforeLongBreak);
@@ -65,7 +66,7 @@ export default function FocusOverlay({ onExit }: Props) {
       ? subtaskList.reduce((sum, t) => sum + (t.estimatedMinutes ?? 0) * 60, 0)
       : (activeTask?.estimatedMinutes ?? 0) * 60;
 
-  const [soundPanelOpen, setSoundPanelOpen] = useState(false);
+
 
   // Load subtasks for active task
   useEffect(() => {
@@ -144,61 +145,81 @@ export default function FocusOverlay({ onExit }: Props) {
     <div className={`fixed inset-0 z-50 flex flex-col ${bgClass}`}>
       {/* Top bar */}
       <div className="flex items-center justify-between px-6 py-4">
-        <span className="text-sm font-semibold text-white/40 tracking-wider">BlitzDesk</span>
+        <span className="text-sm font-semibold text-white/40 tracking-wider">SkadiFlow</span>
 
         {/* Center items */}
         <div className="flex items-center gap-3">
-          {activeLockerProfileId && <LockerBadge />}
+          {isLockerEnabled && <LockerBadge />}
 
-          {/* Sound control */}
-          <div className="relative">
+          {/* Sound control — inline icon strip */}
+          <div className="flex items-center gap-1">
+            {/* Mute toggle */}
             <button
-              onClick={() => setSoundPanelOpen((o) => !o)}
-              className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
+              onClick={() => setFocusSound(focusSound === "none" ? "rain" : "none")}
+              title={focusSound === "none" ? "Enable sound" : "Mute"}
+              className={`p-1.5 rounded transition-colors ${
+                focusSound === "none"
+                  ? "text-white/20 hover:text-white/50"
+                  : "text-orange-400 hover:text-orange-300"
+              }`}
             >
-              {focusSound === "none" ? <VolumeX size={12} /> : <Volume2 size={12} />}
-              <span>{SOUND_LABELS[focusSound] ?? "Sound"}</span>
+              {focusSound === "none" ? <VolumeX size={13} /> : <Volume2 size={13} />}
             </button>
 
-            {soundPanelOpen && (
-              <div className="absolute top-8 left-0 z-10 w-52 bg-[#1A1A1A] border border-white/10 rounded-lg p-3 shadow-xl">
-                <p className="text-[10px] text-white/30 uppercase tracking-widest mb-2">Ambient Sound</p>
-                <div className="space-y-1">
-                  {Object.entries(SOUND_LABELS).map(([val, label]) => (
-                    <button
-                      key={val}
-                      onClick={() => setFocusSound(val)}
-                      className={`w-full text-left text-xs px-2 py-1.5 rounded transition-colors ${
-                        focusSound === val
-                          ? "bg-orange-500/20 text-orange-400"
-                          : "text-white/50 hover:text-white hover:bg-white/5"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {focusSound !== "none" && (
-                  <div className="mt-3">
-                    <p className="text-[10px] text-white/30 mb-1.5">Volume — {focusSoundVolume}%</p>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={5}
-                      value={focusSoundVolume}
-                      onChange={(e) => setFocusSoundVolume(Number(e.target.value))}
-                      className="w-full accent-orange-500"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Sound icons */}
+            {SOUND_OPTIONS.map(({ key, label, icon }) => (
+              <button
+                key={key}
+                title={label}
+                onClick={() => setFocusSound(focusSound === key ? "none" : key)}
+                className={`p-1.5 rounded transition-colors ${
+                  focusSound === key
+                    ? "text-orange-400 bg-orange-500/15"
+                    : "text-white/20 hover:text-white/50 hover:bg-white/5"
+                }`}
+              >
+                {icon}
+              </button>
+            ))}
+
+            {/* Volume slider — only when a sound is active */}
+            <AnimatePresence>
+              {focusSound !== "none" && (
+                <motion.div
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 80, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden flex items-center ml-1"
+                >
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={focusSoundVolume}
+                    onChange={(e) => setFocusSoundVolume(Number(e.target.value))}
+                    className="w-20 accent-orange-500 cursor-pointer"
+                    title={`Volume ${focusSoundVolume}%`}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
 
         {/* Right items */}
         <div className="flex items-center gap-3">
+          {/* Minimize to tray */}
+          <button
+            onClick={() => useTimerStore.getState().minimizeFocusToTray().catch(console.warn)}
+            className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
+            title="Minimizar ventana al tray"
+          >
+            <MonitorOff size={12} />
+            <span className="hidden sm:inline">Minimizar ventana</span>
+          </button>
+
           {/* Minimize to floating */}
           <button
             onClick={() => minimizeToFloating().catch(console.warn)}
@@ -227,7 +248,7 @@ export default function FocusOverlay({ onExit }: Props) {
       </div>
 
       {/* Main content */}
-      <div className="flex flex-1 overflow-hidden" onClick={() => soundPanelOpen && setSoundPanelOpen(false)}>
+      <div className="flex flex-1 overflow-hidden">
         {/* Left panel — Task Queue */}
         <div className="hidden lg:flex w-64 flex-col border-r border-white/5 p-6">
           <TaskQueue />

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "BlitzDesk",
+  "productName": "SkadiFlow",
   "version": "0.1.0",
-  "identifier": "com.kevin.blitzdesk",
+  "identifier": "com.kevin.skadiflow",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "BlitzDesk",
+        "title": "SkadiFlow",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,
@@ -24,19 +24,18 @@
       },
       {
         "label": "floating-timer",
-        "title": "BlitzDesk Timer",
+        "title": "SkadiFlow Timer",
         "url": "/floating-timer",
         "width": 340,
         "height": 88,
         "minWidth": 340,
-        "minHeight": 88,
         "resizable": false,
         "decorations": false,
         "alwaysOnTop": true,
         "transparent": true,
         "visible": false,
-        "center": true,
-        "skipTaskbar": true
+        "skipTaskbar": true,
+        "backgroundColor": [0, 0, 0, 0]
       }
     ],
     "security": {

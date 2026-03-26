@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Name**: BlitzDesk
+**Name**: SkadiFlow
 **Type**: Desktop productivity app (Windows-first, cross-platform later)
 **Inspired by**: [Blitzit](https://www.blitzit.app)
 **Full plan**: See `Plan.md`
@@ -99,7 +99,7 @@ productivity-app/
 5. Routes render inside `AppShell` (Titlebar → Sidebar → `<Outlet>`)
 
 ### DB Layer
-- **File**: `sqlite:blitzdesk.db` (Tauri app data directory)
+- **File**: `sqlite:skadiflow.db` (Tauri app data directory)
 - **Singleton**: `getDb()` in `src/lib/db.ts` lazily loads the connection and caches it — all store and lib code calls `getDb()`, never `Database.load()` directly
 - **Migrations**: Registered in `src-tauri/src/lib.rs` as a `vec![Migration { ... }]` and run automatically on startup via `tauri-plugin-sql`
 - **Settings** are stored as plain strings in the `settings` table and parsed to typed values inside the store (e.g. `parseInt(focusMin)`)
@@ -171,7 +171,7 @@ done       → Done column (hidden by default)
 - Always use `tauri::command` macro with typed returns
 - Sensitive operations (hosts file, secure store) only in Rust — never in JS
 - Locker commands in `commands/locker.rs`: `check_locker_permission`, `activate_locker(domains)`, `deactivate_locker`
-  - Hosts file entries are wrapped in `# BLITZDESK-LOCKER-START` / `# BLITZDESK-LOCKER-END` sentinels so they can be cleanly removed
+  - Hosts file entries are wrapped in `# SKADIFLOW-LOCKER-START` / `# SKADIFLOW-LOCKER-END` sentinels so they can be cleanly removed
 
 ---
 

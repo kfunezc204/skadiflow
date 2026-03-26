@@ -137,7 +137,8 @@ html.dark {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    background: transparent;
     margin: 0;
     padding: 0;
     overflow: hidden;
@@ -152,4 +153,25 @@ html.dark {
   height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* Floating timer window — fully transparent, no scrollbars */
+html.floating-timer-window,
+html.floating-timer-window body,
+html.floating-timer-window #root {
+  background: transparent !important;
+  background-color: transparent !important;
+  color-scheme: normal !important;
+}
+html.floating-timer-window,
+html.floating-timer-window body {
+  height: fit-content !important;
+  min-height: 0 !important;
+}
+html.floating-timer-window body {
+  overflow: hidden !important;  /* no scrollbars */
+}
+html.floating-timer-window #root {
+  height: auto !important;      /* don't stretch to 100vh */
+  overflow: visible !important; /* allow sound menu to overflow below card */
 }

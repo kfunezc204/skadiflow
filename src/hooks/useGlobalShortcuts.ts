@@ -19,7 +19,7 @@ export function useGlobalShortcuts() {
           if (e.state === "Pressed") {
             navigate("/");
             setTimeout(() => {
-              window.dispatchEvent(new CustomEvent("blitzdesk:quick-add"));
+              window.dispatchEvent(new CustomEvent("skadiflow:quick-add"));
             }, 100);
           }
         });

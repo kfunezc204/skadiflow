@@ -1,75 +1,68 @@
 import { create } from "zustand";
-import { toast } from "@/lib/toast";
 import {
   getAllBlockerProfiles,
-  createBlockerProfile as dbCreateBlockerProfile,
-  updateBlockerProfile as dbUpdateBlockerProfile,
-  deleteBlockerProfile as dbDeleteBlockerProfile,
+  createBlockerProfile,
   setBlockerDomains,
-  type BlockerProfile,
 } from "@/lib/db";
 import { invoke } from "@tauri-apps/api/core";
 
 type LockerState = {
-  profiles: BlockerProfile[];
+  blockedDomains: string[];
+  _defaultProfileId: string | null;
   isLockerActive: boolean;
   hasPermission: boolean | null;
   isLoaded: boolean;
 };
 
 type LockerActions = {
-  loadProfiles: () => Promise<void>;
-  createProfile: (name: string, domains: string[]) => Promise<void>;
-  updateProfile: (id: string, name: string, domains: string[]) => Promise<void>;
-  deleteProfile: (id: string) => Promise<void>;
+  loadBlockedDomains: () => Promise<void>;
+  setBlockedDomains: (domains: string[]) => Promise<void>;
   checkPermission: () => Promise<void>;
   setLockerActive: (val: boolean) => void;
 };
 
 export const useLockerStore = create<LockerState & LockerActions>((set, get) => ({
-  profiles: [],
+  blockedDomains: [],
+  _defaultProfileId: null,
   isLockerActive: false,
   hasPermission: null,
   isLoaded: false,
 
-  loadProfiles: async () => {
+  loadBlockedDomains: async () => {
     try {
-      const profiles = await getAllBlockerProfiles();
-      set({ profiles, isLoaded: true });
+      let profiles = await getAllBlockerProfiles();
+      let profile = profiles[0];
+      if (!profile) {
+        const id = crypto.randomUUID();
+        await createBlockerProfile(id, "__default__");
+        await setBlockerDomains(id, []);
+        profiles = await getAllBlockerProfiles();
+        profile = profiles[0];
+      }
+      set({
+        blockedDomains: profile?.domains ?? [],
+        _defaultProfileId: profile?.id ?? null,
+        isLoaded: true,
+      });
     } catch (e) {
-      console.error("loadProfiles failed:", e);
+      console.error("loadBlockedDomains failed:", e);
       set({ isLoaded: true });
     }
   },
 
-  createProfile: async (name, domains) => {
-    const id = crypto.randomUUID();
-    await dbCreateBlockerProfile(id, name);
-    await setBlockerDomains(id, domains);
-    await get().loadProfiles();
-  },
-
-  updateProfile: async (id, name, domains) => {
-    await dbUpdateBlockerProfile(id, name);
-    await setBlockerDomains(id, domains);
-    await get().loadProfiles();
-  },
-
-  deleteProfile: async (id) => {
-    await dbDeleteBlockerProfile(id);
-    set((s) => ({ profiles: s.profiles.filter((p) => p.id !== id) }));
+  setBlockedDomains: async (domains) => {
+    const profileId = get()._defaultProfileId;
+    if (!profileId) return;
+    await setBlockerDomains(profileId, domains);
+    set({ blockedDomains: domains });
   },
 
   checkPermission: async () => {
     try {
       const result = await invoke<boolean>("check_locker_permission");
       set({ hasPermission: result });
-      if (!result) {
-        toast.error("Admin permission required for website blocker");
-      }
     } catch {
       set({ hasPermission: false });
-      toast.error("Admin permission required for website blocker");
     }
   },
 

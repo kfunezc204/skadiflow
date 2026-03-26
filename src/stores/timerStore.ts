@@ -35,15 +35,16 @@ type TimerState = {
   activeSessionId: string | null;
   completedIntervals: CompletedInterval[];
   isLoaded: boolean;
-  activeLockerProfileId: string | null;
+  isLockerEnabled: boolean;
   taskElapsedFocusSeconds: number;
   activeSubtaskIndex: number;
   activeSubtaskTitle: string | null;
   isExtraTime: boolean;
+  isTrayMinimized: boolean;
 };
 
 type TimerActions = {
-  startFocusSession: (taskIds: string[], lockerProfileId?: string | null) => Promise<void>;
+  startFocusSession: (taskIds: string[], enableLocker?: boolean) => Promise<void>;
   tick: () => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -53,9 +54,9 @@ type TimerActions = {
   endSession: () => Promise<void>;
   persistState: () => Promise<void>;
   loadPersistedTimer: () => Promise<void>;
-  setLockerProfile: (profileId: string | null) => void;
   broadcastCurrentState: () => Promise<void>;
   initTimerActionListener: () => Promise<() => void>;
+  minimizeFocusToTray: () => Promise<void>;
 };
 
 // Module-scoped interval — survives route changes (store is a singleton)
@@ -88,15 +89,16 @@ function getPhaseSeconds(phase: TimerPhase): number {
   }
 }
 
-async function activateLockerForProfile(profileId: string) {
+async function activateLocker() {
   try {
     const { useLockerStore } = await import("@/stores/lockerStore");
-    const profile = useLockerStore.getState().profiles.find((p) => p.id === profileId);
-    if (profile && profile.domains.length > 0) {
-      await invoke("activate_locker", { domains: profile.domains });
+    const domains = useLockerStore.getState().blockedDomains;
+    if (domains.length > 0) {
+      await invoke("activate_locker", { domains });
     }
   } catch (e) {
     console.warn("Locker activation failed:", e);
+    toast.error("Website blocker failed — run SkadiFlow as administrator");
   }
 }
 
@@ -151,15 +153,22 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
   activeSessionId: null,
   completedIntervals: [],
   isLoaded: false,
-  activeLockerProfileId: null,
+  isLockerEnabled: false,
   taskElapsedFocusSeconds: 0,
   activeSubtaskIndex: 0,
   activeSubtaskTitle: null,
   isExtraTime: false,
+  isTrayMinimized: false,
 
-  startFocusSession: async (taskIds, lockerProfileId = null) => {
+  startFocusSession: async (taskIds, enableLocker) => {
     if (taskIds.length === 0) return;
     clearIntervalSafe();
+
+    const { useLockerStore } = await import("@/stores/lockerStore");
+    const lockerState = useLockerStore.getState();
+    if (!lockerState.isLoaded) await lockerState.loadBlockedDomains();
+    const hasBlockedDomains = useLockerStore.getState().blockedDomains.length > 0;
+    const shouldLock = (enableLocker !== false) && hasBlockedDomains;
 
     const phase: TimerPhase = "focus";
     const total = getPhaseSeconds(phase);
@@ -178,7 +187,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       taskQueue: taskIds.slice(1),
       activeSessionId: sessionId,
       completedIntervals: [],
-      activeLockerProfileId: lockerProfileId,
+      isLockerEnabled: shouldLock,
       taskElapsedFocusSeconds: 0,
       activeSubtaskIndex: 0,
       isExtraTime: false,
@@ -193,8 +202,8 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
 
     startInterval();
 
-    if (lockerProfileId) {
-      await activateLockerForProfile(lockerProfileId);
+    if (shouldLock) {
+      await activateLocker();
     }
 
     await get().persistState();
@@ -353,8 +362,8 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       const now = new Date().toISOString();
       await dbCreateSession(sessionId, state.activeTaskId, "focus", now);
 
-      if (state.activeLockerProfileId && !useSettingsStore.getState().lockerDuringBreaks) {
-        await activateLockerForProfile(state.activeLockerProfileId);
+      if (state.isLockerEnabled && !useSettingsStore.getState().lockerDuringBreaks) {
+        await activateLocker();
       }
 
       set({
@@ -444,7 +453,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
 
     // Notify listeners (useFocusNotifications hook)
     window.dispatchEvent(
-      new CustomEvent("blitzdesk:phase-complete", { detail: { phase: state.phase } })
+      new CustomEvent("skadiflow:phase-complete", { detail: { phase: state.phase } })
     );
 
     if (state.phase === "focus") {
@@ -465,7 +474,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         activeSessionId: sessionId,
       });
 
-      if (state.activeLockerProfileId && !settings.lockerDuringBreaks) {
+      if (state.isLockerEnabled && !settings.lockerDuringBreaks) {
         await deactivateLockerSafe();
       }
     } else {
@@ -483,8 +492,19 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         activeSessionId: sessionId,
       });
 
-      if (state.activeLockerProfileId && !settings.lockerDuringBreaks) {
-        await activateLockerForProfile(state.activeLockerProfileId);
+      if (state.isLockerEnabled && !settings.lockerDuringBreaks) {
+        await activateLocker();
+      }
+    }
+
+    // Restore window if user had minimized to tray — phase transition needs attention
+    if (state.isTrayMinimized) {
+      set({ isTrayMinimized: false });
+      try {
+        const { showMainWindow } = await import("@/lib/windowManager");
+        await showMainWindow();
+      } catch (e) {
+        console.warn("restoreFromTray failed:", e);
       }
     }
 
@@ -507,7 +527,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       }
     }
 
-    if (state.activeLockerProfileId) {
+    if (state.isLockerEnabled) {
       await deactivateLockerSafe();
     }
 
@@ -535,11 +555,12 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       taskQueue: [],
       activeSessionId: null,
       completedIntervals: [],
-      activeLockerProfileId: null,
+      isLockerEnabled: false,
       taskElapsedFocusSeconds: 0,
       activeSubtaskIndex: 0,
       activeSubtaskTitle: null,
       isExtraTime: false,
+      isTrayMinimized: false,
     });
 
     await get().broadcastCurrentState();
@@ -660,10 +681,6 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     }
   },
 
-  setLockerProfile: (profileId) => {
-    set({ activeLockerProfileId: profileId });
-  },
-
   broadcastCurrentState: async () => {
     try {
       const state = get();
@@ -712,6 +729,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         currentSubtaskEstimateSeconds,
         currentSubtaskElapsedSeconds,
         subtaskProgress: subtaskList.length > 0 ? { done: doneCount, total: subtaskList.length } : null,
+        focusSound: useSettingsStore.getState().focusSound,
       });
     } catch {
       // Broadcast failures are non-critical — ignore
@@ -719,7 +737,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
   },
 
   initTimerActionListener: async () => {
-    const { onTimerAction } = await import("@/lib/timerBridge");
+    const { onTimerAction, onSoundChange } = await import("@/lib/timerBridge");
     const unlisten = await onTimerAction(async (action) => {
       const store = useTimerStore.getState();
       switch (action) {
@@ -737,8 +755,43 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
           }
           break;
         }
+        case "minimize-tray": {
+          await store.minimizeFocusToTray();
+          break;
+        }
       }
     });
-    return unlisten;
+
+    const unlistenSound = await onSoundChange(async (sound) => {
+      try {
+        const { setFocusSound, focusSoundVolume } = useSettingsStore.getState();
+        await setFocusSound(sound);
+        const { playAmbientSound, stopAmbientSound } = await import("@/lib/audioManager");
+        if (sound === "none") {
+          stopAmbientSound();
+        } else {
+          playAmbientSound(sound, focusSoundVolume);
+        }
+        await useTimerStore.getState().broadcastCurrentState();
+      } catch (e) {
+        console.warn("Sound change from floating timer failed:", e);
+      }
+    });
+
+    return () => {
+      unlisten();
+      unlistenSound();
+    };
+  },
+
+  minimizeFocusToTray: async () => {
+    set({ isTrayMinimized: true });
+    try {
+      const { minimizeFocusToTray } = await import("@/lib/windowManager");
+      await minimizeFocusToTray();
+    } catch (e) {
+      console.warn("minimizeFocusToTray failed:", e);
+      set({ isTrayMinimized: false });
+    }
   },
 }));

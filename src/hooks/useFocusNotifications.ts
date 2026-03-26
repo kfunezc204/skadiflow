@@ -47,7 +47,7 @@ export function useFocusNotifications() {
       }
     }
 
-    window.addEventListener("blitzdesk:phase-complete", handlePhaseComplete);
-    return () => window.removeEventListener("blitzdesk:phase-complete", handlePhaseComplete);
+    window.addEventListener("skadiflow:phase-complete", handlePhaseComplete);
+    return () => window.removeEventListener("skadiflow:phase-complete", handlePhaseComplete);
   }, [notificationsEnabled]);
 }

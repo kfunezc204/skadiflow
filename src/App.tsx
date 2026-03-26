@@ -38,7 +38,10 @@ export default function App() {
     };
   }, []);
 
+  const isFloating = window.location.pathname === "/floating-timer";
+
   if (!isLoaded) {
+    if (isFloating) return null;
     return (
       <div className="flex h-screen items-center justify-center bg-[#1A1A1A]">
         <div className="flex flex-col items-center gap-3">

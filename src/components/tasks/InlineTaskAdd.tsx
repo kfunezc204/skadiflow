@@ -61,7 +61,7 @@ export default function InlineTaskAdd({ status }: Props) {
     function handleDomQuickAdd() {
       openInput();
     }
-    window.addEventListener("blitzdesk:quick-add", handleDomQuickAdd);
+    window.addEventListener("skadiflow:quick-add", handleDomQuickAdd);
 
     // Tauri event (from tray menu)
     let unlisten: (() => void) | null = null;
@@ -74,7 +74,7 @@ export default function InlineTaskAdd({ status }: Props) {
     }).catch(() => {});
 
     return () => {
-      window.removeEventListener("blitzdesk:quick-add", handleDomQuickAdd);
+      window.removeEventListener("skadiflow:quick-add", handleDomQuickAdd);
       if (unlisten) unlisten();
     };
   }, [status]);

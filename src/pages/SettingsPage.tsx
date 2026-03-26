@@ -114,7 +114,7 @@ export default function SettingsPage() {
         {/* Header */}
         <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={0}>
           <h1 className="text-xl font-bold text-white">Settings</h1>
-          <p className="text-xs text-white/40 mt-0.5">Configure BlitzDesk to your workflow</p>
+          <p className="text-xs text-white/40 mt-0.5">Configure SkadiFlow to your workflow</p>
         </motion.div>
 
         {/* Appearance */}
@@ -413,7 +413,7 @@ export default function SettingsPage() {
         <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={9}>
           <SectionHeader title="About" />
           <SettingCard>
-            <SettingRow label="BlitzDesk" description="v0.1.0">
+            <SettingRow label="SkadiFlow" description="v0.1.0">
               <Button
                 variant="outline"
                 size="sm"

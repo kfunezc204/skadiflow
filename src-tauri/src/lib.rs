@@ -1,6 +1,7 @@
 mod commands;
 
 use tauri::{Emitter, Manager};
+use tauri::webview::Color;
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconEvent;
@@ -32,7 +33,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:blitzdesk.db", migrations)
+                .add_migrations("sqlite:skadiflow.db", migrations)
                 .build(),
         )
         .plugin(tauri_plugin_shell::init())
@@ -47,7 +48,7 @@ pub fn run() {
         .setup(|app| {
             let show_hide = MenuItem::with_id(app, "show_hide", "Show / Hide", true, None::<&str>)?;
             let quick_add = MenuItem::with_id(app, "quick_add", "Quick Add Task", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit BlitzDesk", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit SkadiFlow", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[
                 &show_hide,
                 &quick_add,
@@ -57,7 +58,7 @@ pub fn run() {
 
             let _tray = tauri::tray::TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("BlitzDesk")
+                .tooltip("SkadiFlow")
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     let window = app.get_webview_window("main").unwrap();
@@ -82,7 +83,7 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { .. } = event {
+                    if let TrayIconEvent::Click { button_state: tauri::tray::MouseButtonState::Up, .. } = event {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
                             if window.is_visible().unwrap_or(false) {
@@ -95,6 +96,12 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // Set transparent background on the floating-timer webview (required for Windows WebView2)
+            if let Some(webview) = app.get_webview_window("floating-timer") {
+                let _ = webview.set_background_color(Some(Color(0, 0, 0, 0)));
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())

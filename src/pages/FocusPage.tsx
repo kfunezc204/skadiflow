@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
-import { Play, ChevronUp, ChevronDown, ShieldCheck, Timer as TimerIcon } from "lucide-react";
+import { Play, ChevronUp, ChevronDown, Timer as TimerIcon, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTimerStore } from "@/stores/timerStore";
 import { useTaskStore, useTasksByColumn } from "@/stores/taskStore";
 import { useListStore } from "@/stores/listStore";
-import { useLockerStore } from "@/stores/lockerStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useLockerStore } from "@/stores/lockerStore";
 import FocusOverlay from "@/components/focus/FocusOverlay";
 import LockerPanel from "@/components/focus/LockerPanel";
+import { minimizeToFloating } from "@/lib/windowManager";
 import EmptyState from "@/components/layout/EmptyState";
 import { formatMinutes } from "@/lib/timeUtils";
 
@@ -93,17 +94,26 @@ export default function FocusPage() {
 
   const selectedListId = useListStore((s) => s.selectedListId);
   const todayTasks = useTasksByColumn("today", selectedListId);
-  const profiles = useLockerStore((s) => s.profiles);
-  const { loadProfiles, isLoaded: lockerLoaded } = useLockerStore.getState();
   const pomodoroFocusMinutes = useSettingsStore((s) => s.pomodoroFocusMinutes);
 
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [selectedLockerProfileId, setSelectedLockerProfileId] = useState<string | null>(null);
-  const [showLocker, setShowLocker] = useState(false);
+  const blockedDomains = useLockerStore((s) => s.blockedDomains);
+  const hasLockerPermission = useLockerStore((s) => s.hasPermission);
+  const lockerStoreLoaded = useLockerStore((s) => s.isLoaded);
 
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showLocker, setShowLocker] = useState(false);
+  const [lockerEnabled, setLockerEnabled] = useState(true);
+
+  // Load blocked domains and check permission once
   useEffect(() => {
-    if (!lockerLoaded) loadProfiles();
-  }, [lockerLoaded, loadProfiles]);
+    const store = useLockerStore.getState();
+    if (!lockerStoreLoaded) {
+      store.loadBlockedDomains();
+    }
+    if (store.hasPermission === null) {
+      store.checkPermission();
+    }
+  }, [lockerStoreLoaded]);
 
   // Pre-select all today tasks (re-run when list changes or tasks change)
   const todayTaskIds = todayTasks.map((t) => t.id).join(",");
@@ -144,7 +154,8 @@ export default function FocusPage() {
 
   async function handleStart() {
     if (selectedIds.length === 0) return;
-    await startFocusSession(selectedIds, selectedLockerProfileId);
+    await startFocusSession(selectedIds, lockerEnabled);
+    minimizeToFloating().catch(console.warn);
   }
 
   // Render tasks in selection order, then unselected tasks after
@@ -216,47 +227,45 @@ export default function FocusPage() {
             )}
           </div>
 
-          {/* Locker profile selector */}
-          {profiles.length > 0 && (
-            <div className="mb-6">
-              <label className="text-[10px] font-semibold tracking-widest text-white/30 uppercase block mb-2">
-                Focus Locker Profile
-              </label>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setSelectedLockerProfileId(null)}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors ${
-                    selectedLockerProfileId === null
-                      ? "border-white/20 bg-white/10 text-white/70"
-                      : "border-white/10 text-white/30 hover:border-white/20 hover:text-white/50"
-                  }`}
-                >
-                  No Locker
-                </button>
-                {profiles.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setSelectedLockerProfileId(p.id)}
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors ${
-                      selectedLockerProfileId === p.id
-                        ? "border-orange-500/50 bg-orange-500/10 text-orange-400"
-                        : "border-white/10 text-white/30 hover:border-white/20 hover:text-white/50"
-                    }`}
-                  >
-                    <ShieldCheck size={10} />
-                    {p.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Session info */}
-          <div className="mb-8 flex items-center gap-2 text-xs text-white/30">
+          <div className="mb-4 flex items-center gap-2 text-xs text-white/30">
             <span>{selectedIds.length} task{selectedIds.length !== 1 ? "s" : ""} selected</span>
             <span>·</span>
             <span>{pomodoroFocusMinutes}min focus intervals</span>
           </div>
+
+          {/* Locker toggle — only show when there are blocked domains */}
+          {blockedDomains.length > 0 && (
+            <div className="mb-6 flex flex-col gap-2">
+              <button
+                onClick={() => setLockerEnabled((v) => !v)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-full border text-xs font-medium transition-colors w-fit ${
+                  lockerEnabled
+                    ? "border-orange-500/40 bg-orange-500/10 text-orange-400 hover:bg-orange-500/15"
+                    : "border-white/10 bg-white/5 text-white/40 hover:bg-white/8"
+                }`}
+              >
+                {lockerEnabled ? (
+                  <>
+                    <ShieldCheck size={13} />
+                    Block {blockedDomains.length} site{blockedDomains.length !== 1 ? "s" : ""}
+                  </>
+                ) : (
+                  <>
+                    <ShieldOff size={13} />
+                    No blocking
+                  </>
+                )}
+              </button>
+
+              {lockerEnabled && hasLockerPermission === false && (
+                <div className="flex items-center gap-1.5 text-[11px] text-amber-400/80">
+                  <AlertTriangle size={11} className="flex-shrink-0" />
+                  No permission — run SkadiFlow as administrator to block sites
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Start button */}
           <Button
@@ -284,9 +293,38 @@ export default function FocusPage() {
         {showLocker ? (
           <LockerPanel />
         ) : (
-          <p className="text-xs text-white/20">
-            Block distracting websites during focus sessions.
-          </p>
+          <div className="flex flex-col gap-4">
+            <p className="text-xs text-white/20">
+              Block distracting websites during focus sessions.
+            </p>
+
+            {blockedDomains.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                {blockedDomains.map((domain) => (
+                  <div
+                    key={domain}
+                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06]"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-orange-500/50 flex-shrink-0" />
+                    <span className="text-xs text-white/40 truncate">{domain}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-white/10 p-4">
+                <p className="text-[11px] text-white/30 leading-relaxed">
+                  No sites added yet. Add websites you want to block during focus sessions.
+                </p>
+                <button
+                  onClick={() => setShowLocker(true)}
+                  className="flex items-center gap-1.5 text-[11px] font-medium text-orange-400 hover:text-orange-300 transition-colors"
+                >
+                  <ShieldCheck size={12} />
+                  Add blocked websites
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

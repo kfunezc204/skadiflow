@@ -18,12 +18,14 @@ export type TimerSnapshot = {
   currentSubtaskEstimateSeconds: number | null;
   currentSubtaskElapsedSeconds: number;
   subtaskProgress: { done: number; total: number } | null;
+  focusSound: string;
 };
 
-export type TimerAction = "pause" | "resume" | "skip" | "done" | "expand" | "exit";
+export type TimerAction = "pause" | "resume" | "skip" | "done" | "expand" | "exit" | "minimize-tray";
 
-const TIMER_STATE_EVENT = "blitzdesk:timer-state";
-const TIMER_ACTION_EVENT = "blitzdesk:timer-action";
+const TIMER_STATE_EVENT = "skadiflow:timer-state";
+const TIMER_ACTION_EVENT = "skadiflow:timer-action";
+const SOUND_CHANGE_EVENT = "skadiflow:sound-change";
 
 export function broadcastTimerState(snapshot: TimerSnapshot): Promise<void> {
   return emit(TIMER_STATE_EVENT, snapshot);
@@ -39,4 +41,12 @@ export function sendTimerAction(action: TimerAction): Promise<void> {
 
 export function onTimerAction(cb: (a: TimerAction) => void): Promise<UnlistenFn> {
   return listen<TimerAction>(TIMER_ACTION_EVENT, (event) => cb(event.payload));
+}
+
+export function sendSoundChange(sound: string): Promise<void> {
+  return emit(SOUND_CHANGE_EVENT, sound);
+}
+
+export function onSoundChange(cb: (sound: string) => void): Promise<UnlistenFn> {
+  return listen<string>(SOUND_CHANGE_EVENT, (event) => cb(event.payload));
 }

@@ -63,7 +63,23 @@ pub fn activate_locker(domains: Vec<String>) -> Result<(), String> {
     block.push_str(&format!("{}\n", SENTINEL_END));
 
     let new_content = clean + &block;
-    fs::write(&path, new_content).map_err(|e| e.to_string())
+    fs::write(&path, new_content).map_err(|e| e.to_string())?;
+
+    // Flush OS DNS cache so new entries take effect immediately
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("ipconfig")
+            .args(["/flushdns"])
+            .output();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = std::process::Command::new("dscacheutil")
+            .args(["-flushcache"])
+            .output();
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

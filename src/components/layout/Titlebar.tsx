@@ -1,8 +1,8 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X } from "lucide-react";
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { Minus, Square, X } from 'lucide-react'
 
 export default function Titlebar() {
-  const win = getCurrentWindow();
+  const win = getCurrentWindow()
 
   return (
     <div
@@ -14,12 +14,15 @@ export default function Titlebar() {
         className="flex items-center gap-2 px-4 select-none"
         data-tauri-drag-region
       >
-        <div className="w-2 h-2 rounded-full bg-orange-500" data-tauri-drag-region />
+        <div
+          className="w-2 h-2 rounded-full bg-orange-500"
+          data-tauri-drag-region
+        />
         <span
           className="text-xs font-bold tracking-[0.2em] text-white/90 uppercase"
           data-tauri-drag-region
         >
-          BlitzDesk
+          skadiflow{' '}
         </span>
       </div>
 
@@ -51,5 +54,5 @@ export default function Titlebar() {
         </button>
       </div>
     </div>
-  );
+  )
 }
