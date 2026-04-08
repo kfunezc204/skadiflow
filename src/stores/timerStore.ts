@@ -42,6 +42,7 @@ type TimerState = {
   activeSubtaskTitle: string | null;
   isExtraTime: boolean;
   isTrayMinimized: boolean;
+  isMarkingDone: boolean;
 };
 
 type TimerActions = {
@@ -160,6 +161,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
   activeSubtaskTitle: null,
   isExtraTime: false,
   isTrayMinimized: false,
+  isMarkingDone: false,
 
   startFocusSession: async (taskIds, enableLocker) => {
     if (taskIds.length === 0) return;
@@ -429,8 +431,13 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
   },
 
   markDone: async () => {
+    if (get().isMarkingDone) return;
+    set({ isMarkingDone: true });
     const state = get();
-    if (!state.activeTaskId) return;
+    if (!state.activeTaskId) {
+      set({ isMarkingDone: false });
+      return;
+    }
 
     const completedTitle =
       useTaskStore.getState().tasks.find((t) => t.id === state.activeTaskId)?.title ?? "Tarea";
@@ -459,6 +466,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       } catch (e) {
         console.warn("Notification failed:", e);
       }
+      set({ isMarkingDone: false });
       await get().endSession();
       return;
     }
@@ -492,6 +500,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       set(doneSeed);
     }
     set({ activeSubtaskTitle: getActiveSubtaskTitle(nextTask, doneSeed.activeSubtaskIndex) });
+    set({ isMarkingDone: false });
     await get().persistState();
     await get().broadcastCurrentState();
   },
@@ -661,6 +670,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       activeSubtaskTitle: null,
       isExtraTime: false,
       isTrayMinimized: false,
+      isMarkingDone: false,
     });
 
     await get().broadcastCurrentState();

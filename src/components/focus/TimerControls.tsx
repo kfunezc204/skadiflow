@@ -9,6 +9,7 @@ type Props = {
 export default function TimerControls({ onExit }: Props) {
   const status = useTimerStore((s) => s.status);
   const phase = useTimerStore((s) => s.phase);
+  const isMarkingDone = useTimerStore((s) => s.isMarkingDone);
   const { pause, resume, skip, markDone } = useTimerStore.getState();
 
   const isRunning = status === "running";
@@ -39,7 +40,8 @@ export default function TimerControls({ onExit }: Props) {
         <Button
           variant="outline"
           onClick={markDone}
-          className="h-10 w-10 rounded-full border-white/20 bg-transparent text-white/60 hover:text-white hover:bg-white/10 p-0"
+          disabled={isMarkingDone}
+          className="h-10 w-10 rounded-full border-white/20 bg-transparent text-white/60 hover:text-white hover:bg-white/10 p-0 disabled:opacity-30 disabled:cursor-not-allowed"
           title="Mark done (D)"
         >
           <CheckCheck size={16} />

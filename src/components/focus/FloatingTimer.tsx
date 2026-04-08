@@ -30,12 +30,14 @@ const SOUND_OPTIONS = [
 export default function FloatingTimer() {
   const [snapshot, setSnapshot] = useState<TimerSnapshot | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastHeightRef = useRef(0);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const h = el.offsetHeight;
-    if (h > 0) {
+    if (h > 0 && h !== lastHeightRef.current) {
+      lastHeightRef.current = h;
       const win = getCurrentWindow();
       win.setMinSize(new LogicalSize(340, h)).catch(console.warn);
       win.setSize(new LogicalSize(340, h)).catch(console.warn);

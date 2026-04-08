@@ -93,7 +93,7 @@ export default function FocusOverlay({ onExit }: Props) {
           break;
         case "d":
         case "D":
-          if (phase === "focus") useTimerStore.getState().markDone();
+          if (phase === "focus" && !useTimerStore.getState().isMarkingDone) useTimerStore.getState().markDone();
           break;
         case "Escape":
           onExit();

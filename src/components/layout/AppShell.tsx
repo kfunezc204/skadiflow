@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import Titlebar from "./Titlebar";
 import Sidebar from "./Sidebar";
 import ShortcutModal from "./ShortcutModal";
+import GlobalQuickAddDialog from "./GlobalQuickAddDialog";
 import { useFocusNotifications } from "@/hooks/useFocusNotifications";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 
@@ -14,6 +15,18 @@ export default function AppShell() {
 
   const location = useLocation();
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+
+  // Global handler for tray "Quick Add Task" — opens dialog without navigating
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen("quick-add", () => {
+        setQuickAddOpen(true);
+      }).then((fn) => { unlisten = fn; });
+    }).catch(() => {});
+    return () => { if (unlisten) unlisten(); };
+  }, []);
 
   // "?" key opens shortcut modal (guard against typing in inputs)
   useEffect(() => {
@@ -62,6 +75,11 @@ export default function AppShell() {
       <ShortcutModal
         open={shortcutModalOpen}
         onClose={() => setShortcutModalOpen(false)}
+      />
+
+      <GlobalQuickAddDialog
+        open={quickAddOpen}
+        onClose={() => setQuickAddOpen(false)}
       />
     </div>
   );

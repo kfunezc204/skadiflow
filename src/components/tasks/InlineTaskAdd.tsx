@@ -59,30 +59,12 @@ export default function InlineTaskAdd({ status }: Props) {
     }
   }
 
-  // Listen for quick-add events (from tray or global shortcut) — only "today" column responds
+  // Listen for quick-add DOM event (dispatched centrally by AppShell) — only "today" column responds
   useEffect(() => {
     if (status !== "today") return;
-
-    // DOM custom event (from global shortcut hook)
-    function handleDomQuickAdd() {
-      openInput();
-    }
+    function handleDomQuickAdd() { openInput(); }
     window.addEventListener("skadiflow:quick-add", handleDomQuickAdd);
-
-    // Tauri event (from tray menu)
-    let unlisten: (() => void) | null = null;
-    import("@tauri-apps/api/event").then(({ listen }) => {
-      listen("quick-add", () => {
-        openInput();
-      }).then((fn) => {
-        unlisten = fn;
-      });
-    }).catch(() => {});
-
-    return () => {
-      window.removeEventListener("skadiflow:quick-add", handleDomQuickAdd);
-      if (unlisten) unlisten();
-    };
+    return () => window.removeEventListener("skadiflow:quick-add", handleDomQuickAdd);
   }, [status]);
 
   return (
