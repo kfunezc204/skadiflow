@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Minimize2, MonitorOff, Volume2, VolumeX, CheckCircle2, Circle, CloudRain, Coffee, Wind, Music, Waves, TreePine } from "lucide-react";
+import Marquee from "@/components/ui/Marquee";
 import { useTimerStore } from "@/stores/timerStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTaskStore, type Task } from "@/stores/taskStore";
@@ -260,9 +261,10 @@ export default function FocusOverlay({ onExit }: Props) {
           <div className="text-center max-w-lg w-full">
             {phase === "focus" ? (
               <>
-                <p className="text-xl font-medium text-white/80 leading-snug">
-                  {activeTask?.title ?? "Focus time"}
-                </p>
+                <Marquee
+                  text={activeTask?.title ?? "Focus time"}
+                  className="text-xl font-medium text-white/80 leading-snug"
+                />
 
                 {/* EST badge */}
                 {totalEstimateSeconds > 0 && !isExtraTime && (
@@ -278,10 +280,10 @@ export default function FocusOverlay({ onExit }: Props) {
                       initial={{ opacity: 0, scale: 0.8 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.8 }}
-                      className="inline-flex items-center mt-2 px-2.5 py-0.5 rounded-full bg-orange-500/20 border border-orange-500/40"
+                      className="inline-flex items-center mt-2 px-2.5 py-0.5 rounded-full bg-red-500/20 border border-red-500/40"
                     >
-                      <span className="text-xs font-semibold text-orange-400 tracking-widest uppercase">
-                        Extra Time
+                      <span className="text-xs font-semibold text-red-400 tracking-widest uppercase">
+                        Overtime
                       </span>
                     </motion.div>
                   )}

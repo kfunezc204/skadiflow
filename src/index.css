@@ -59,6 +59,13 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+@keyframes marquee-scroll {
+  0%   { transform: translateX(0); }
+  15%  { transform: translateX(0); }
+  85%  { transform: translateX(var(--marquee-offset)); }
+  100% { transform: translateX(var(--marquee-offset)); }
+}
+
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

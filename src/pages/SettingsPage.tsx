@@ -1,5 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import { useTaskStore } from "@/stores/taskStore";
+import { useListStore } from "@/stores/listStore";
+import { parseCsvTasks } from "@/lib/csvImport";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
@@ -77,6 +80,7 @@ export default function SettingsPage() {
     focusSound,
     focusSoundVolume,
     autoOpenLinks,
+    reminderIntervalMinutes,
     setTheme,
     setPomodoroFocusMinutes,
     setPomodoroShortBreakMinutes,
@@ -90,9 +94,47 @@ export default function SettingsPage() {
     setFocusSound,
     setFocusSoundVolume,
     setAutoOpenLinks,
+    setReminderIntervalMinutes,
   } = useSettingsStore();
 
   const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    const text = await file.text();
+    const rows = parseCsvTasks(text);
+    if (rows.length === 0) {
+      toast.error("No tasks found in CSV");
+      return;
+    }
+    const { lists, createList } = useListStore.getState();
+    const { addTask } = useTaskStore.getState();
+    let imported = 0;
+    for (const row of rows) {
+      let listId: string | undefined;
+      if (row.listName) {
+        const normalizedName = row.listName.toLowerCase();
+        let found = useListStore.getState().lists.find(
+          (l) => l.name.toLowerCase() === normalizedName
+        );
+        if (!found) {
+          await createList(row.listName, "#6B7280", "list");
+          found = useListStore.getState().lists.find(
+            (l) => l.name.toLowerCase() === normalizedName
+          );
+        }
+        listId = found?.id;
+      }
+      if (!listId) listId = lists[0]?.id;
+      if (!listId) continue;
+      await addTask(row.title, "backlog", listId, row.estimatedMinutes);
+      imported++;
+    }
+    toast.success(`Imported ${imported} task${imported !== 1 ? "s" : ""}`);
+  }
 
   // Extract single value from base-ui Slider (returns number | readonly number[])
   function sliderVal(v: number | readonly number[]): number {
@@ -261,7 +303,9 @@ export default function SettingsPage() {
                 }}
               >
                 <SelectTrigger className="w-32 h-8 text-sm bg-[#111] border-[#2A2A2A] text-white">
-                  <SelectValue />
+                  <SelectValue>
+                    {weekStart === 0 ? "Sunday" : "Monday"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
                   <SelectItem value="0" className="focus:bg-white/10 focus:text-white">
@@ -374,6 +418,30 @@ export default function SettingsPage() {
                 }}
               />
             </SettingRow>
+
+            <SettingRow
+              label="Mid-session Reminder"
+              description="Notification interval during focus (0 = off)"
+            >
+              <Select
+                value={String(reminderIntervalMinutes)}
+                onValueChange={async (val) => {
+                  if (val) await setReminderIntervalMinutes(parseInt(val));
+                  toast.success("Settings updated");
+                }}
+              >
+                <SelectTrigger className="w-32 h-8 text-sm bg-[#111] border-[#2A2A2A] text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
+                  <SelectItem value="0" className="focus:bg-white/10 focus:text-white">Off</SelectItem>
+                  <SelectItem value="5" className="focus:bg-white/10 focus:text-white">Every 5 min</SelectItem>
+                  <SelectItem value="10" className="focus:bg-white/10 focus:text-white">Every 10 min</SelectItem>
+                  <SelectItem value="15" className="focus:bg-white/10 focus:text-white">Every 15 min</SelectItem>
+                  <SelectItem value="30" className="focus:bg-white/10 focus:text-white">Every 30 min</SelectItem>
+                </SelectContent>
+              </Select>
+            </SettingRow>
           </SettingCard>
         </motion.div>
 
@@ -397,8 +465,32 @@ export default function SettingsPage() {
           </SettingCard>
         </motion.div>
 
-        {/* Account */}
+        {/* Import & Export */}
         <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={8}>
+          <SectionHeader title="Import & Export" />
+          <SettingCard>
+            <SettingRow label="Import from CSV" description="Columns: title, est, list — one task per row">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => csvInputRef.current?.click()}
+                className="h-8 text-xs border-[#2A2A2A] bg-transparent text-white/60 hover:text-white hover:bg-white/5"
+              >
+                Choose file
+              </Button>
+            </SettingRow>
+          </SettingCard>
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={handleCsvImport}
+          />
+        </motion.div>
+
+        {/* Account */}
+        <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={9}>
           <SectionHeader title="Account" />
           <SettingCard>
             <div className="px-4 py-3">
@@ -410,7 +502,7 @@ export default function SettingsPage() {
         </motion.div>
 
         {/* About */}
-        <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={9}>
+        <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={10}>
           <SectionHeader title="About" />
           <SettingCard>
             <SettingRow label="SkadiFlow" description="v0.1.0">

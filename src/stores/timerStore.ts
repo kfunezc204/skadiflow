@@ -11,6 +11,7 @@ import {
   updateTask as dbUpdateTask,
 } from "@/lib/db";
 import { invoke } from "@tauri-apps/api/core";
+import { broadcastTimerState } from "@/lib/timerBridge";
 
 export type TimerPhase = "focus" | "short_break" | "long_break";
 export type TimerStatus = "idle" | "running" | "paused";
@@ -208,6 +209,15 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
 
     await get().persistState();
     await get().broadcastCurrentState();
+
+    // Auto-show floating timer and minimize main window
+    try {
+      const { showFloatingTimer, hideMainWindow } = await import("@/lib/windowManager");
+      await showFloatingTimer();
+      await hideMainWindow();
+    } catch (e) {
+      console.warn("Auto-show floating timer on session start failed:", e);
+    }
   },
 
   tick: async () => {
@@ -234,6 +244,8 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         ? (useTaskStore.getState().subtasks[state.activeTaskId] ?? [])
         : [];
 
+      let completedTitles: string[] = [];
+
       if (subtaskList.length > 0) {
         let cumulativeSeconds = 0;
         let newIndex = subtaskList.length; // past all = extra time
@@ -250,11 +262,14 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
             const sub = subtaskList[i];
             if (sub.completedAt === null) {
               useTaskStore.getState().toggleSubtask(state.activeTaskId!, sub.id);
+              completedTitles.push(sub.title);
             }
           }
         }
 
-        const finalIndex = Math.min(newIndex, subtaskList.length);
+        // Guard: index may only increase — prevents concurrent ticks from reading stale index
+        const rawIndex = Math.min(newIndex, subtaskList.length);
+        const finalIndex = Math.max(rawIndex, state.activeSubtaskIndex);
         updates.activeSubtaskIndex = finalIndex;
         if (finalIndex !== state.activeSubtaskIndex) {
           updates.activeSubtaskTitle = getActiveSubtaskTitle(state.activeTaskId, finalIndex);
@@ -265,7 +280,41 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         updates.isExtraTime = newElapsed >= activeTask.estimatedMinutes * 60;
       }
 
+      // Commit state BEFORE any async work — prevents concurrent ticks from reading stale index
       set(updates);
+
+      // Async side-effects after state is committed
+      if (completedTitles.length > 0) {
+        try {
+          const { playTaskCompleteChime } = await import("@/lib/audioManager");
+          playTaskCompleteChime();
+        } catch (e) {
+          console.warn("Subtask chime failed:", e);
+        }
+        for (const title of completedTitles) {
+          toast(`✅ "${title}" completada`);
+        }
+      }
+
+      // Mid-session reminder notifications
+      const { notificationsEnabled, reminderIntervalMinutes } = useSettingsStore.getState();
+      if (
+        notificationsEnabled &&
+        reminderIntervalMinutes > 0 &&
+        newElapsed > 0 &&
+        newElapsed % (reminderIntervalMinutes * 60) === 0
+      ) {
+        const minutesIn = Math.round(newElapsed / 60);
+        try {
+          const { sendNotification } = await import("@tauri-apps/plugin-notification");
+          await sendNotification({
+            title: "Focus check-in",
+            body: `${minutesIn} min in — keep going!`,
+          });
+        } catch (e) {
+          console.warn("Reminder notification failed:", e);
+        }
+      }
     }
 
     await get().broadcastCurrentState();
@@ -383,14 +432,53 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     const state = get();
     if (!state.activeTaskId) return;
 
+    const completedTitle =
+      useTaskStore.getState().tasks.find((t) => t.id === state.activeTaskId)?.title ?? "Tarea";
+
     await syncTaskActualMinutes(state.activeTaskId);
     await useTaskStore.getState().completeTask(state.activeTaskId);
 
     const [nextTask, ...rest] = state.taskQueue;
+
+    // Play chime regardless of window state (AudioContext runs in background)
+    try {
+      const { playTaskCompleteChime } = await import("@/lib/audioManager");
+      playTaskCompleteChime();
+    } catch (e) {
+      console.warn("Chime failed:", e);
+    }
+
     if (!nextTask) {
+      // No more tasks — endSession will show its own toast
+      try {
+        const { sendNotification } = await import("@tauri-apps/plugin-notification");
+        await sendNotification({
+          title: "🎉 ¡Sesión completa!",
+          body: `"${completedTitle}" fue la última tarea.`,
+        });
+      } catch (e) {
+        console.warn("Notification failed:", e);
+      }
       await get().endSession();
       return;
     }
+
+    const nextTitle =
+      useTaskStore.getState().tasks.find((t) => t.id === nextTask)?.title ?? "Siguiente tarea";
+
+    // System notification — visible even when minimized or in tray
+    try {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      await sendNotification({
+        title: `✅ "${completedTitle}" completada`,
+        body: `Ahora trabajando en: "${nextTitle}"`,
+      });
+    } catch (e) {
+      console.warn("Notification failed:", e);
+    }
+
+    // In-app toast for when the window is visible
+    toast(`✅ "${completedTitle}" lista → Ahora: "${nextTitle}"`);
 
     set({
       activeTaskId: nextTask,
@@ -480,20 +568,29 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     } else {
       // Break ended → start next focus
       const total = getPhaseSeconds("focus");
-      const sessionId = crypto.randomUUID();
-      const now = new Date().toISOString();
 
-      await dbCreateSession(sessionId, state.activeTaskId, "focus", now);
-
-      set({
-        phase: "focus",
-        secondsRemaining: total,
-        totalSeconds: total,
-        activeSessionId: sessionId,
-      });
-
-      if (state.isLockerEnabled && !settings.lockerDuringBreaks) {
-        await activateLocker();
+      if (settings.autoStartNextPomodoro) {
+        const sessionId = crypto.randomUUID();
+        const now = new Date().toISOString();
+        await dbCreateSession(sessionId, state.activeTaskId, "focus", now);
+        set({
+          phase: "focus",
+          secondsRemaining: total,
+          totalSeconds: total,
+          activeSessionId: sessionId,
+        });
+        if (state.isLockerEnabled && !settings.lockerDuringBreaks) {
+          await activateLocker();
+        }
+      } else {
+        // User must manually resume — pause at the start of the next focus interval
+        set({
+          phase: "focus",
+          secondsRemaining: total,
+          totalSeconds: total,
+          activeSessionId: null,
+          status: "paused",
+        });
       }
     }
 
@@ -508,7 +605,10 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       }
     }
 
-    startInterval();
+    // Only start the interval if the timer is still running (autoStartNextPomodoro may have paused it)
+    if (get().status === "running") {
+      startInterval();
+    }
     await get().persistState();
     await get().broadcastCurrentState();
   },
@@ -691,8 +791,8 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         ? (useTaskStore.getState().subtasks[state.activeTaskId] ?? [])
         : [];
 
-      // Use stored stable title — never re-derive from mutable subtask array on every tick
-      const currentSubtaskTitle = state.activeSubtaskTitle;
+      // Derive the current subtask title live from index + list to prevent stale-value cycling
+      const currentSubtaskTitle = getActiveSubtaskTitle(state.activeTaskId, state.activeSubtaskIndex);
 
       // Elapsed within current subtask (numeric — no flicker concern)
       let currentSubtaskElapsedSeconds = 0;
@@ -712,7 +812,6 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
 
       const doneCount = subtaskList.filter((s) => s.completedAt !== null).length;
 
-      const { broadcastTimerState } = await import("@/lib/timerBridge");
       await broadcastTimerState({
         phase: state.phase,
         status: state.status,

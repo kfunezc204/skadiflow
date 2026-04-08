@@ -18,6 +18,7 @@ type SettingsState = {
   focusSound: string;
   focusSoundVolume: number;
   autoOpenLinks: boolean;
+  reminderIntervalMinutes: number;
   isLoaded: boolean;
 };
 
@@ -37,6 +38,7 @@ type SettingsActions = {
   setFocusSound: (val: string) => Promise<void>;
   setFocusSoundVolume: (val: number) => Promise<void>;
   setAutoOpenLinks: (val: boolean) => Promise<void>;
+  setReminderIntervalMinutes: (val: number) => Promise<void>;
 };
 
 export const useSettingsStore = create<SettingsState & SettingsActions>(
@@ -55,6 +57,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
     focusSound: "none",
     focusSoundVolume: 50,
     autoOpenLinks: false,
+    reminderIntervalMinutes: 0,
     isLoaded: false,
 
     loadSettings: async () => {
@@ -73,6 +76,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
         focusSound,
         focusSoundVol,
         autoOpenLinks,
+        reminderInterval,
       ] = await Promise.all([
         getSetting("theme"),
         getSetting("pomodoro_focus_minutes"),
@@ -88,6 +92,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
         getSetting("focus_sound"),
         getSetting("focus_sound_volume"),
         getSetting("auto_open_links"),
+        getSetting("reminder_interval_minutes"),
       ]);
 
       const resolvedTheme: Theme =
@@ -114,6 +119,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
         focusSound: focusSound || "none",
         focusSoundVolume: focusSoundVol ? parseInt(focusSoundVol) : 50,
         autoOpenLinks: autoOpenLinks === "true",
+        reminderIntervalMinutes: reminderInterval ? parseInt(reminderInterval) : 0,
         isLoaded: true,
       });
     },
@@ -187,6 +193,11 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
     setAutoOpenLinks: async (val: boolean) => {
       await setSetting("auto_open_links", String(val));
       set({ autoOpenLinks: val });
+    },
+
+    setReminderIntervalMinutes: async (val: number) => {
+      await setSetting("reminder_interval_minutes", String(val));
+      set({ reminderIntervalMinutes: val });
     },
   })
 );

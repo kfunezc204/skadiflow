@@ -36,6 +36,21 @@
         "visible": false,
         "skipTaskbar": true,
         "backgroundColor": [0, 0, 0, 0]
+      },
+      {
+        "label": "task-toast",
+        "title": "SkadiFlow Notification",
+        "url": "/task-toast",
+        "width": 360,
+        "height": 84,
+        "minWidth": 360,
+        "resizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "transparent": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "backgroundColor": [0, 0, 0, 0]
       }
     ],
     "security": {

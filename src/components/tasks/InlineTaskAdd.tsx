@@ -7,7 +7,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { useTaskStore, type TaskStatus } from "@/stores/taskStore";
 import { useListStore } from "@/stores/listStore";
@@ -20,10 +19,18 @@ type Props = {
 export default function InlineTaskAdd({ status }: Props) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
-  const [pickedListId, setPickedListId] = useState("inbox-default");
+  const [pickedListId, setPickedListId] = useState<string | null>(null);
+  const selectOpenRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { addTask } = useTaskStore();
   const { selectedListId, lists } = useListStore();
+
+  // Derive the effective list ID — always a valid list or the first one
+  const effectiveListId =
+    pickedListId && lists.some((l) => l.id === pickedListId)
+      ? pickedListId
+      : lists[0]?.id ?? "";
 
   function openInput() {
     setOpen(true);
@@ -38,8 +45,7 @@ export default function InlineTaskAdd({ status }: Props) {
       return;
     }
     const { title, est } = extractEstFromTitle(trimmed);
-    const effectiveListId = selectedListId ?? pickedListId;
-    await addTask(title, status, effectiveListId, est);
+    await addTask(title, status, selectedListId ?? effectiveListId, est);
     setValue("");
     // Keep open for rapid entry
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -91,11 +97,34 @@ export default function InlineTaskAdd({ status }: Props) {
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <div className="flex gap-1.5">
+            <div
+              ref={containerRef}
+              className="flex gap-1.5"
+              onBlur={(e) => {
+                if (selectOpenRef.current) return;
+                if (!containerRef.current?.contains(e.relatedTarget as Node)) {
+                  if (!value.trim()) {
+                    setOpen(false);
+                    setValue("");
+                  }
+                }
+              }}
+            >
               {selectedListId === null && (
-                <Select value={pickedListId} onValueChange={(v) => { if (v) setPickedListId(v); }}>
+                <Select
+                  value={effectiveListId}
+                  onValueChange={(v) => {
+                    if (v) setPickedListId(v);
+                    setTimeout(() => inputRef.current?.focus(), 0);
+                  }}
+                  onOpenChange={(o) => {
+                    selectOpenRef.current = o;
+                  }}
+                >
                   <SelectTrigger className="w-[120px] h-8 text-xs bg-[#111] border-[#2A2A2A] text-white/60 flex-shrink-0">
-                    <SelectValue />
+                    <span className="truncate">
+                      {lists.find((l) => l.id === effectiveListId)?.name ?? "Select list"}
+                    </span>
                   </SelectTrigger>
                   <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
                     {lists.map((l) => (
@@ -105,18 +134,22 @@ export default function InlineTaskAdd({ status }: Props) {
                     ))}
                   </SelectContent>
                 </Select>
-
               )}
               <Input
                 ref={inputRef}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                onBlur={() => {
-                  if (!value.trim()) {
-                    setOpen(false);
-                    setValue("");
-                  }
+                onPaste={(e: React.ClipboardEvent<HTMLInputElement>) => {
+                  const text = e.clipboardData.getData("text");
+                  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+                  if (lines.length <= 1) return; // single line — normal paste
+                  e.preventDefault();
+                  const listId = selectedListId ?? effectiveListId;
+                  lines.forEach((line) => {
+                    const { title, est } = extractEstFromTitle(line);
+                    addTask(title, status, listId, est);
+                  });
                 }}
                 placeholder="Task title… (append 30m for estimate)"
                 className="h-8 text-sm bg-[#111] border-[#2A2A2A] focus:border-orange-500/50 text-white placeholder:text-white/25"

@@ -296,7 +296,7 @@ export default function TaskDetailPanel() {
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 flex flex-col gap-4">
             {/* Title */}
             <div>
               <label className="text-[10px] text-white/30 uppercase tracking-wider mb-1 block">
@@ -335,8 +335,10 @@ export default function TaskDetailPanel() {
                   List
                 </label>
                 <Select value={task.listId} onValueChange={handleListChange}>
-                  <SelectTrigger className="h-8 text-xs bg-[#1A1A1A] border-[#2A2A2A] text-white">
-                    <SelectValue />
+                  <SelectTrigger className="h-8 text-xs bg-[#1A1A1A] border-[#2A2A2A] text-white overflow-hidden">
+                    <span className="truncate">
+                      {lists.find((l) => l.id === task.listId)?.name ?? "Select list"}
+                    </span>
                   </SelectTrigger>
                   <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A]">
                     {lists.map((l) => (
@@ -507,7 +509,7 @@ export default function TaskDetailPanel() {
                     if (e.key === "Escape") setSubtaskInput("");
                   }}
                   placeholder="Add a subtask…"
-                  className="h-7 text-xs bg-[#1A1A1A] border-[#2A2A2A] focus:border-orange-500/50 text-white placeholder:text-white/25"
+                  className="h-7 text-xs bg-[#1A1A1A] border-[#2A2A2A] focus:border-orange-500/50 text-white placeholder:text-white/25 min-w-0"
                 />
                 <Input
                   value={subtaskEstInput}

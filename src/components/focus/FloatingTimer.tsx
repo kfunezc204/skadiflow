@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Play, Pause, SkipForward, Maximize2, MonitorOff, X, CloudRain, Coffee, Wind, Music, Waves, TreePine, VolumeX } from "lucide-react";
+import Marquee from "@/components/ui/Marquee";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { onTimerState, sendTimerAction, sendSoundChange } from "@/lib/timerBridge";
@@ -42,9 +43,16 @@ export default function FloatingTimer() {
   });
 
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
-    onTimerState((s) => setSnapshot(s)).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    onTimerState((s) => { if (!cancelled) setSnapshot(s); }).then((fn) => {
+      unlisten = fn;
+      if (cancelled) fn(); // cleanup ran before promise resolved (React StrictMode)
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   const currentSound = snapshot?.focusSound ?? "none";
@@ -97,12 +105,11 @@ export default function FloatingTimer() {
           <span
             className={`h-2 w-2 rounded-full flex-shrink-0 ${PHASE_DOT[snapshot.phase] ?? "bg-white/20"}`}
           />
-          <span
-            className="flex-1 text-[11px] text-white/70 truncate min-w-0 font-medium"
-            data-tauri-drag-region
-          >
-            {phaseLabel}
-          </span>
+          <Marquee
+            text={phaseLabel}
+            className="flex-1 text-[11px] text-white/70 font-medium"
+            dragRegion
+          />
           {snapshot.subtaskProgress && (
             <span className="text-[10px] text-white/30 flex-shrink-0 tabular-nums">
               {snapshot.subtaskProgress.done}/{snapshot.subtaskProgress.total}

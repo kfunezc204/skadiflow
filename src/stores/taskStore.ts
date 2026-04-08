@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { toast } from "@/lib/toast";
+import { emit } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getAllTasks,
   getDoneTasks,
@@ -171,7 +173,44 @@ export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
     const task = get().tasks.find((t) => t.id === id);
     if (!task) return null;
     await dbCompleteTask(id);
-    toast.success("Task completed!");
+
+    // Cascade completion to any incomplete subtasks
+    const incompleteSubs = (get().subtasks[id] ?? []).filter((s) => s.completedAt === null);
+    for (const sub of incompleteSubs) {
+      await dbToggleSubtask(sub.id, true, task.status);
+    }
+    if (incompleteSubs.length > 0) {
+      const now = new Date().toISOString();
+      set((state) => {
+        const updated = (state.subtasks[id] ?? []).map((s) => ({
+          ...s,
+          completedAt: s.completedAt ?? now,
+          status: "done" as TaskStatus,
+        }));
+        return {
+          subtasks: { ...state.subtasks, [id]: updated },
+          subtaskCounts: {
+            ...state.subtaskCounts,
+            [id]: {
+              total: updated.length,
+              done: updated.length,
+              estimatedMinutesSum: state.subtaskCounts[id]?.estimatedMinutesSum ?? null,
+            },
+          },
+        };
+      });
+    }
+
+    try {
+      const isVisible = await getCurrentWindow().isVisible();
+      if (isVisible) {
+        toast.success("Task completed!");
+      } else {
+        await emit("task-completed-toast", { title: task.title });
+      }
+    } catch {
+      toast.success("Task completed!");
+    }
     set((state) => ({
       tasks: state.tasks.filter((t) => t.id !== id),
     }));

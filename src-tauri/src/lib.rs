@@ -60,6 +60,7 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("SkadiFlow")
                 .menu(&menu)
+                .menu_on_left_click(false)
                 .on_menu_event(|app, event| {
                     let window = app.get_webview_window("main").unwrap();
                     match event.id().as_ref() {
@@ -99,6 +100,10 @@ pub fn run() {
 
             // Set transparent background on the floating-timer webview (required for Windows WebView2)
             if let Some(webview) = app.get_webview_window("floating-timer") {
+                let _ = webview.set_background_color(Some(Color(0, 0, 0, 0)));
+            }
+            // Set transparent background on the task-toast notification window
+            if let Some(webview) = app.get_webview_window("task-toast") {
                 let _ = webview.set_background_color(Some(Color(0, 0, 0, 0)));
             }
 

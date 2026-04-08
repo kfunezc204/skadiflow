@@ -65,11 +65,15 @@ export default function TaskCard({ task, columnStatus, columnTasks }: Props) {
 
   // Actual time badge color
   let actualBadgeClass = "bg-white/5 text-white/50";
+  let isOvertime = false;
   if (displayedEst && task.actualMinutes > 0) {
     const ratio = task.actualMinutes / displayedEst;
     if (ratio <= 1.0) actualBadgeClass = "bg-green-500/20 text-green-400";
     else if (ratio <= 1.25) actualBadgeClass = "bg-yellow-500/20 text-yellow-400";
-    else actualBadgeClass = "bg-red-500/20 text-red-400";
+    else {
+      actualBadgeClass = "bg-red-500/20 text-red-400 animate-pulse";
+      isOvertime = true;
+    }
   }
 
   function startActualEdit(e: React.MouseEvent) {
@@ -253,7 +257,7 @@ export default function TaskCard({ task, columnStatus, columnTasks }: Props) {
                   variant="secondary"
                   className={`h-4 px-1.5 text-[10px] border-0 ${actualBadgeClass}`}
                 >
-                  {formatMinutes(task.actualMinutes)}
+                  {formatMinutes(task.actualMinutes)}{isOvertime ? " · OT" : ""}
                 </Badge>
                 {!isTimerActiveOnThis && (
                   <button

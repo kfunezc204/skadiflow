@@ -8,6 +8,7 @@ import FocusPage from "@/pages/FocusPage";
 import ReportsPage from "@/pages/ReportsPage";
 import SettingsPage from "@/pages/SettingsPage";
 import FloatingTimerPage from "@/pages/FloatingTimerPage";
+import TaskToastPage from "@/pages/TaskToastPage";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTimerStore } from "@/stores/timerStore";
 
@@ -21,13 +22,13 @@ export default function App() {
   useEffect(() => {
     useSettingsStore.getState().loadSettings().then(() => {
       // Only the main window runs the timer — floating window is a passive display
-      if (window.location.pathname !== "/floating-timer") {
+      if (window.location.pathname !== "/floating-timer" && window.location.pathname !== "/task-toast") {
         useTimerStore.getState().loadPersistedTimer();
       }
     });
 
     // Only the main window listens for timer actions from the floating window
-    if (window.location.pathname !== "/floating-timer") {
+    if (window.location.pathname !== "/floating-timer" && window.location.pathname !== "/task-toast") {
       useTimerStore.getState().initTimerActionListener().then((unlisten) => {
         actionListenerCleanup.current = unlisten;
       });
@@ -39,9 +40,10 @@ export default function App() {
   }, []);
 
   const isFloating = window.location.pathname === "/floating-timer";
+  const isTaskToast = window.location.pathname === "/task-toast";
 
   if (!isLoaded) {
-    if (isFloating) return null;
+    if (isFloating || isTaskToast) return null;
     return (
       <div className="flex h-screen items-center justify-center bg-[#1A1A1A]">
         <div className="flex flex-col items-center gap-3">
@@ -58,6 +60,8 @@ export default function App() {
       <Routes>
         {/* Floating timer window — outside AppShell, no sidebar/titlebar */}
         <Route path="/floating-timer" element={<FloatingTimerPage />} />
+        {/* Task completion toast window — always-on-top overlay */}
+        <Route path="/task-toast" element={<TaskToastPage />} />
         <Route element={<AppShell />}>
           <Route path="/" element={<BoardPage />} />
           <Route path="/focus" element={<FocusPage />} />

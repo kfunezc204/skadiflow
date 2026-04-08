@@ -138,7 +138,7 @@ export default function Sidebar() {
                 >
                   Rename / Edit
                 </DropdownMenuItem>
-                {list.id !== "inbox-default" && (
+                {lists.length > 1 && (
                   <DropdownMenuItem
                     onClick={() => openDelete(list)}
                     className="text-red-400 hover:text-red-300 focus:text-red-300 focus:bg-red-500/10 cursor-pointer"
