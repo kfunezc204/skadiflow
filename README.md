@@ -97,6 +97,15 @@ Contributions are welcome. Please read [CLAUDE.md](./CLAUDE.md) before submittin
 
 ---
 
+## Support
+
+If you find SkadiFlow useful, consider supporting development:
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/kfunezc204)
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Sponsor-EA4AAA?logo=github-sponsors&logoColor=white)](https://github.com/sponsors/kfunezc204)
+
+---
+
 ## License
 
 MIT
