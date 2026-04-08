@@ -1,6 +1,6 @@
 # SkadiFlow
 
-A focused productivity desktop app for Windows (cross-platform soon), inspired by [Blitzit](https://www.blitzit.app).
+A focused productivity desktop app for Windows (cross-platform soon).
 
 Built with **Tauri v2 + React + TypeScript + SQLite** — local-first, fast, and open source.
 
