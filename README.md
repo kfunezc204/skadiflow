@@ -101,6 +101,7 @@ Contributions are welcome. Please read [CLAUDE.md](./CLAUDE.md) before submittin
 
 If you find SkadiFlow useful, consider supporting development:
 
+[![Download](https://img.shields.io/badge/Download-Windows%20.exe-0078D4?logo=windows&logoColor=white)](https://kfunezc204.gumroad.com/l/skadiflow)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/kfunezc204)
 
 ---
