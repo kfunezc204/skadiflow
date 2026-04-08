@@ -1,13 +1,16 @@
 import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Play } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import TaskCard from "./TaskCard";
 import InlineTaskAdd from "./InlineTaskAdd";
 import EmptyState from "@/components/layout/EmptyState";
 import { type Task, type TaskStatus } from "@/stores/taskStore";
+import { useTimerStore } from "@/stores/timerStore";
+import { minimizeToFloating } from "@/lib/windowManager";
 
 type Props = {
   status: TaskStatus;
@@ -27,6 +30,16 @@ export default function KanbanColumn({ status, title, tasks, accentColor }: Prop
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const color = accentColor ?? STATUS_COLORS[status];
   const itemIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
+  const timerStatus = useTimerStore((s) => s.status);
+  const navigate = useNavigate();
+
+  async function handleStartFocus() {
+    const ids = [...tasks].sort((a, b) => a.position - b.position).map((t) => t.id);
+    if (ids.length === 0) return;
+    await useTimerStore.getState().startFocusSession(ids);
+    navigate("/focus");
+    minimizeToFloating().catch(() => {});
+  }
 
   return (
     <div className="flex flex-col min-w-[280px] flex-1">
@@ -42,6 +55,15 @@ export default function KanbanColumn({ status, title, tasks, accentColor }: Prop
             {tasks.length}
           </span>
         </div>
+        {status === "today" && tasks.length > 0 && timerStatus === "idle" && (
+          <button
+            onClick={handleStartFocus}
+            className="flex items-center h-7 px-3 text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white rounded-md transition-colors"
+          >
+            <Play size={12} className="mr-1" />
+            Start Focus
+          </button>
+        )}
       </div>
 
       {/* Drop zone */}

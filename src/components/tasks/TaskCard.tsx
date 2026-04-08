@@ -1,9 +1,8 @@
 import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { format, isPast, isToday, parseISO } from "date-fns";
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Play, Pencil } from "lucide-react";
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -45,7 +44,6 @@ export default function TaskCard({ task, columnStatus, columnTasks }: Props) {
   const selectedListId = useListStore((s) => s.selectedListId);
   const timerStatus = useTimerStore((s) => s.status);
   const activeTaskId = useTimerStore((s) => s.activeTaskId);
-  const navigate = useNavigate();
   const isTimerActiveOnThis = timerStatus !== "idle" && activeTaskId === task.id;
 
   const list = lists.find((l) => l.id === task.listId);
@@ -293,20 +291,6 @@ export default function TaskCard({ task, columnStatus, columnTasks }: Props) {
             )}
           </div>
         </div>
-
-        {/* Focus button — Today tasks only, when timer is idle */}
-        {columnStatus === "today" && timerStatus === "idle" && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              useTimerStore.getState().startFocusSession([task.id]).then(() => navigate("/focus"));
-            }}
-            className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 p-1 rounded text-orange-500/50 hover:text-orange-500 hover:bg-orange-500/10"
-            title="Start focus session"
-          >
-            <Play size={12} />
-          </button>
-        )}
 
         {/* Arrow actions — hover only */}
         <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">

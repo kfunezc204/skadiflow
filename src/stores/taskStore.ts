@@ -71,7 +71,7 @@ type TaskActions = {
   updateTaskInMemory: (id: string, fields: Partial<Pick<Task, "actualMinutes" | "estimatedMinutes">>) => void;
   loadSubtasks: (parentId: string) => Promise<void>;
   loadSubtaskCounts: () => Promise<void>;
-  addSubtask: (parentId: string, title: string, estimatedMinutes?: number | null) => Promise<void>;
+  addSubtask: (parentId: string, title: string, estimatedMinutes?: number | null, description?: string | null) => Promise<void>;
   updateSubtask: (parentId: string, subtaskId: string, fields: Parameters<typeof dbUpdateTask>[1]) => Promise<void>;
   toggleSubtask: (parentId: string, subtaskId: string) => Promise<void>;
   deleteSubtask: (parentId: string, subtaskId: string) => Promise<void>;
@@ -309,18 +309,18 @@ export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
     set({ subtaskCounts: counts });
   },
 
-  addSubtask: async (parentId, title, estimatedMinutes) => {
+  addSubtask: async (parentId, title, estimatedMinutes, description) => {
     const parent = get().tasks.find((t) => t.id === parentId);
     if (!parent) return;
     const id = crypto.randomUUID();
     const maxPos = await getMaxSubtaskPosition(parentId);
     const position = maxPos + 1;
-    await dbCreateSubtask(id, parentId, parent.listId, title, parent.status, position, estimatedMinutes);
+    await dbCreateSubtask(id, parentId, parent.listId, title, parent.status, position, estimatedMinutes, description);
     const newSubtask: Task = {
       id,
       listId: parent.listId,
       title,
-      description: null,
+      description: description ?? null,
       status: parent.status,
       estimatedMinutes: estimatedMinutes ?? null,
       actualMinutes: 0,
@@ -357,6 +357,7 @@ export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
               ...s,
               ...(fields.estimatedMinutes !== undefined && { estimatedMinutes: fields.estimatedMinutes }),
               ...(fields.title !== undefined && { title: fields.title }),
+              ...(fields.description !== undefined && { description: fields.description }),
             }
           : s
       );

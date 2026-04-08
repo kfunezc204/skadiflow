@@ -56,7 +56,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
     focusBackground: "dark",
     focusSound: "none",
     focusSoundVolume: 50,
-    autoOpenLinks: false,
+    autoOpenLinks: true,
     reminderIntervalMinutes: 0,
     isLoaded: false,
 
@@ -118,7 +118,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
         focusBackground: focusBg || "dark",
         focusSound: focusSound || "none",
         focusSoundVolume: focusSoundVol ? parseInt(focusSoundVol) : 50,
-        autoOpenLinks: autoOpenLinks === "true",
+        autoOpenLinks: autoOpenLinks !== "false",
         reminderIntervalMinutes: reminderInterval ? parseInt(reminderInterval) : 0,
         isLoaded: true,
       });

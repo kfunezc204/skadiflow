@@ -52,6 +52,7 @@ type TimerActions = {
   resume: () => Promise<void>;
   skip: () => Promise<void>;
   markDone: () => Promise<void>;
+  markSubtaskDone: () => Promise<void>;
   nextPhase: () => Promise<void>;
   endSession: () => Promise<void>;
   persistState: () => Promise<void>;
@@ -136,6 +137,54 @@ async function seedSubtaskProgress(taskId: string): Promise<{ taskElapsedFocusSe
   return { taskElapsedFocusSeconds: elapsed, activeSubtaskIndex: index };
 }
 
+/** Open URLs found in a task (and its first pending subtask) if autoOpenLinks is enabled. */
+async function openTaskUrls(taskId: string) {
+  try {
+    const { autoOpenLinks } = useSettingsStore.getState();
+    if (!autoOpenLinks) return;
+    const { extractUrls } = await import("@/lib/urlUtils");
+    const storeState = useTaskStore.getState();
+    const task = storeState.tasks.find((t) => t.id === taskId);
+    const subs = storeState.subtasks[taskId] ?? [];
+    const firstPending = subs.find((s) => s.completedAt === null);
+    const text = [
+      task?.title,
+      task?.description,
+      firstPending?.title,
+      firstPending?.description,
+    ].filter(Boolean).join(" ");
+    const urls = extractUrls(text);
+    if (urls.length === 0) return;
+    const { open } = await import("@tauri-apps/plugin-shell");
+    for (const url of urls) {
+      open(url).catch(console.warn);
+    }
+  } catch (e) {
+    console.warn("openTaskUrls failed:", e);
+  }
+}
+
+/** Open URLs found only in a specific subtask (used when advancing to the next subtask). */
+async function openSubtaskUrls(taskId: string, subtaskIndex: number) {
+  try {
+    const { autoOpenLinks } = useSettingsStore.getState();
+    if (!autoOpenLinks) return;
+    const { extractUrls } = await import("@/lib/urlUtils");
+    const subs = useTaskStore.getState().subtasks[taskId] ?? [];
+    const sub = subs[subtaskIndex];
+    if (!sub) return;
+    const text = [sub.title, sub.description].filter(Boolean).join(" ");
+    const urls = extractUrls(text);
+    if (urls.length === 0) return;
+    const { open } = await import("@tauri-apps/plugin-shell");
+    for (const url of urls) {
+      open(url).catch(console.warn);
+    }
+  } catch (e) {
+    console.warn("openSubtaskUrls failed:", e);
+  }
+}
+
 async function deactivateLockerSafe() {
   try {
     await invoke("deactivate_locker");
@@ -202,6 +251,8 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       set(seed);
     }
     set({ activeSubtaskTitle: getActiveSubtaskTitle(taskIds[0], seed.activeSubtaskIndex) });
+
+    await openTaskUrls(taskIds[0]);
 
     startInterval();
 
@@ -400,6 +451,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
           set(skipSeed);
         }
         set({ activeSubtaskTitle: getActiveSubtaskTitle(nextTask, skipSeed.activeSubtaskIndex) });
+        await openTaskUrls(nextTask);
         startInterval();
         await get().persistState();
         await get().broadcastCurrentState();
@@ -500,7 +552,76 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       set(doneSeed);
     }
     set({ activeSubtaskTitle: getActiveSubtaskTitle(nextTask, doneSeed.activeSubtaskIndex) });
+    await openTaskUrls(nextTask);
     set({ isMarkingDone: false });
+    await get().persistState();
+    await get().broadcastCurrentState();
+  },
+
+  markSubtaskDone: async () => {
+    if (get().isMarkingDone) return;
+    const state = get();
+    if (!state.activeTaskId || state.phase !== "focus") return;
+
+    const subtaskList = useTaskStore.getState().subtasks[state.activeTaskId] ?? [];
+
+    // No subtasks → fall through to mark whole task done
+    if (subtaskList.length === 0) {
+      await get().markDone();
+      return;
+    }
+
+    // Find current pending subtask at or after activeSubtaskIndex
+    const pendingIdx = subtaskList.findIndex(
+      (s, i) => i >= state.activeSubtaskIndex && s.completedAt === null
+    );
+
+    if (pendingIdx === -1) {
+      // All subtasks already done → mark task done
+      await get().markDone();
+      return;
+    }
+
+    const currentSub = subtaskList[pendingIdx];
+
+    set({ isMarkingDone: true });
+    await useTaskStore.getState().toggleSubtask(state.activeTaskId, currentSub.id);
+
+    try {
+      const { playTaskCompleteChime } = await import("@/lib/audioManager");
+      playTaskCompleteChime();
+    } catch (e) {
+      console.warn("Chime failed:", e);
+    }
+
+    toast(`✅ "${currentSub.title}" completada`);
+
+    // Find next pending subtask (from old list — everything after pendingIdx)
+    const nextPendingIdx = subtaskList.findIndex((s, i) => i > pendingIdx && s.completedAt === null);
+
+    if (nextPendingIdx === -1) {
+      // Last pending subtask completed → mark task done
+      set({ isMarkingDone: false });
+      await get().markDone();
+      return;
+    }
+
+    // Advance elapsed so tick() doesn't re-complete the just-finished subtask
+    let cumulativeSeconds = 0;
+    for (let i = 0; i <= pendingIdx; i++) {
+      cumulativeSeconds += (subtaskList[i].estimatedMinutes ?? 0) * 60;
+    }
+    const newElapsed = Math.max(state.taskElapsedFocusSeconds, cumulativeSeconds);
+
+    set({
+      activeSubtaskIndex: nextPendingIdx,
+      activeSubtaskTitle: getActiveSubtaskTitle(state.activeTaskId, nextPendingIdx),
+      taskElapsedFocusSeconds: newElapsed,
+      isExtraTime: false,
+      isMarkingDone: false,
+    });
+
+    await openSubtaskUrls(state.activeTaskId, nextPendingIdx);
     await get().persistState();
     await get().broadcastCurrentState();
   },
@@ -853,7 +974,8 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         case "pause":   await store.pause();   break;
         case "resume":  await store.resume();  break;
         case "skip":    await store.skip();    break;
-        case "done":    await store.markDone(); break;
+        case "done":         await store.markDone(); break;
+        case "subtask-done": await store.markSubtaskDone(); break;
         case "exit":    await store.endSession(); break;
         case "expand": {
           try {

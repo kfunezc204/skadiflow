@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Minimize2, MonitorOff, Volume2, VolumeX, CheckCircle2, Circle, CloudRain, Coffee, Wind, Music, Waves, TreePine } from "lucide-react";
 import Marquee from "@/components/ui/Marquee";
@@ -74,9 +74,6 @@ export default function FocusOverlay({ onExit }: Props) {
     if (activeTaskId) useTaskStore.getState().loadSubtasks(activeTaskId);
   }, [activeTaskId]);
 
-  // Track previous activeTaskId to avoid auto-opening on mount
-  const prevActiveTaskIdRef = useRef<string | null>(null);
-
   // Keyboard shortcuts
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -93,7 +90,7 @@ export default function FocusOverlay({ onExit }: Props) {
           break;
         case "d":
         case "D":
-          if (phase === "focus" && !useTimerStore.getState().isMarkingDone) useTimerStore.getState().markDone();
+          if (phase === "focus" && !useTimerStore.getState().isMarkingDone) useTimerStore.getState().markSubtaskDone();
           break;
         case "Escape":
           onExit();
@@ -103,20 +100,6 @@ export default function FocusOverlay({ onExit }: Props) {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [status, phase, pause, resume, onExit]);
-
-  // Auto-open URLs on task transition
-  useEffect(() => {
-    if (!autoOpenLinks || phase !== "focus" || !activeTaskId) return;
-    if (activeTaskId === prevActiveTaskIdRef.current) return;
-    prevActiveTaskIdRef.current = activeTaskId;
-
-    const urls = extractUrls(activeTask?.title ?? "");
-    if (urls.length === 0) return;
-
-    import("@tauri-apps/plugin-shell").then(({ open }) => {
-      urls.forEach((url) => open(url).catch(console.warn));
-    }).catch(console.warn);
-  }, [activeTaskId, autoOpenLinks, phase, activeTask?.title]);
 
   // Ambient sound — start/stop with session
   useEffect(() => {
@@ -138,7 +121,15 @@ export default function FocusOverlay({ onExit }: Props) {
   const dots = Array.from({ length: cyclesBeforeLong }, (_, i) => i + 1);
 
   // Extracted URLs for display
-  const taskUrls = phase === "focus" ? extractUrls(activeTask?.title ?? "") : [];
+  const firstPendingSubtask = subtaskList.find((s) => s.completedAt === null);
+  const taskUrls = phase === "focus"
+    ? extractUrls([
+        activeTask?.title,
+        activeTask?.description,
+        firstPendingSubtask?.title,
+        firstPendingSubtask?.description,
+      ].filter(Boolean).join(" "))
+    : [];
 
   const bgClass = FOCUS_BG[focusBackground] ?? FOCUS_BG.dark;
 

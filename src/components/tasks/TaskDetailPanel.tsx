@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Trash2, Calendar, GripVertical, Plus } from "lucide-react";
+import { X, Trash2, Calendar, GripVertical, Plus, StickyNote } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import {
   DndContext,
@@ -55,11 +55,15 @@ function SortableSubtaskRow({
   onToggle,
   onDelete,
   onUpdateEst,
+  onUpdateTitle,
+  onUpdateNotes,
 }: {
   subtask: Task;
   onToggle: () => void;
   onDelete: () => void;
   onUpdateEst: (est: number | null) => void;
+  onUpdateTitle: (title: string) => void;
+  onUpdateNotes: (notes: string | null) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: subtask.id,
@@ -70,9 +74,21 @@ function SortableSubtaskRow({
     opacity: isDragging ? 0.4 : 1,
   };
   const isDone = subtask.completedAt !== null;
+
+  // EST editing
   const [editingEst, setEditingEst] = useState(false);
   const [estDraft, setEstDraft] = useState("");
   const estInputRef = useRef<HTMLInputElement>(null);
+
+  // Title editing
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(subtask.title);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  // Notes
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesDraft, setNotesDraft] = useState(subtask.description ?? "");
+  const notesRef = useRef<HTMLTextAreaElement>(null);
 
   function startEstEdit(e: React.MouseEvent) {
     e.stopPropagation();
@@ -86,70 +102,153 @@ function SortableSubtaskRow({
     setEditingEst(false);
   }
 
+  function startTitleEdit(e: React.MouseEvent) {
+    e.stopPropagation();
+    setTitleDraft(subtask.title);
+    setEditingTitle(true);
+    setTimeout(() => titleInputRef.current?.select(), 0);
+  }
+
+  function saveTitleEdit() {
+    const trimmed = titleDraft.trim();
+    if (trimmed && trimmed !== subtask.title) onUpdateTitle(trimmed);
+    setEditingTitle(false);
+  }
+
+  function toggleNotes(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!notesOpen) {
+      setNotesDraft(subtask.description ?? "");
+      setNotesOpen(true);
+      setTimeout(() => notesRef.current?.focus(), 50);
+    } else {
+      setNotesOpen(false);
+    }
+  }
+
+  function saveNotes() {
+    const val = notesDraft.trim() || null;
+    if (val !== subtask.description) onUpdateNotes(val);
+  }
+
+  const hasNotes = !!subtask.description;
+
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="flex items-center gap-2 group/row py-1"
-    >
-      <button
-        {...attributes}
-        {...listeners}
-        className="text-white/20 hover:text-white/50 cursor-grab active:cursor-grabbing flex-shrink-0"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <GripVertical size={12} />
-      </button>
-      <Checkbox
-        checked={isDone}
-        onCheckedChange={onToggle}
-        className="border-white/20 data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500 flex-shrink-0"
-      />
-      <span
-        className={`flex-1 text-xs leading-snug ${
-          isDone ? "line-through text-white/30" : "text-white/80"
-        }`}
-      >
-        {subtask.title}
-      </span>
-
-      {/* EST badge / inline edit */}
-      {editingEst ? (
-        <Input
-          ref={estInputRef}
-          value={estDraft}
-          onChange={(e) => setEstDraft(e.target.value)}
-          onBlur={saveEstEdit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") saveEstEdit();
-            if (e.key === "Escape") setEditingEst(false);
-          }}
-          onClick={(e) => e.stopPropagation()}
-          className="h-4 w-14 px-1 py-0 text-[10px] bg-[#111] border-orange-500/50 text-white flex-shrink-0"
-        />
-      ) : subtask.estimatedMinutes != null ? (
-        <Badge
-          variant="secondary"
-          onClick={startEstEdit}
-          className="h-4 px-1.5 text-[10px] bg-white/5 text-white/50 border-0 cursor-pointer hover:bg-orange-500/20 hover:text-orange-300 flex-shrink-0"
-        >
-          {formatMinutes(subtask.estimatedMinutes)}
-        </Badge>
-      ) : (
+    <div ref={setNodeRef} style={style}>
+      <div className="flex items-center gap-2 group/row py-1">
         <button
-          onClick={startEstEdit}
-          className="opacity-0 group-hover/row:opacity-100 transition-opacity text-[10px] text-white/25 hover:text-white/50 flex-shrink-0 px-1"
+          {...attributes}
+          {...listeners}
+          className="text-white/20 hover:text-white/50 cursor-grab active:cursor-grabbing flex-shrink-0"
+          onClick={(e) => e.stopPropagation()}
         >
-          est
+          <GripVertical size={12} />
         </button>
-      )}
+        <Checkbox
+          checked={isDone}
+          onCheckedChange={onToggle}
+          className="border-white/20 data-[state=checked]:bg-orange-500 data-[state=checked]:border-orange-500 flex-shrink-0"
+        />
 
-      <button
-        onClick={onDelete}
-        className="opacity-0 group-hover/row:opacity-100 transition-opacity text-white/20 hover:text-red-400 flex-shrink-0 p-0.5"
-      >
-        <X size={11} />
-      </button>
+        {/* Title — double-click to edit */}
+        {editingTitle ? (
+          <Input
+            ref={titleInputRef}
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={saveTitleEdit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveTitleEdit();
+              if (e.key === "Escape") setEditingTitle(false);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 h-5 px-1 py-0 text-xs bg-[#111] border-orange-500/50 text-white"
+          />
+        ) : (
+          <span
+            onDoubleClick={startTitleEdit}
+            className={`flex-1 text-xs leading-snug ${
+              isDone ? "line-through text-white/30" : "text-white/80"
+            }`}
+          >
+            {subtask.title}
+          </span>
+        )}
+
+        {/* Notes toggle */}
+        <button
+          onClick={toggleNotes}
+          className={`flex-shrink-0 p-0.5 rounded transition-opacity ${
+            hasNotes
+              ? "text-orange-400/60 hover:text-orange-400"
+              : "opacity-0 group-hover/row:opacity-100 text-white/25 hover:text-white/50"
+          }`}
+          title="Notes"
+        >
+          <StickyNote size={10} />
+        </button>
+
+        {/* EST badge / inline edit */}
+        {editingEst ? (
+          <Input
+            ref={estInputRef}
+            value={estDraft}
+            onChange={(e) => setEstDraft(e.target.value)}
+            onBlur={saveEstEdit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveEstEdit();
+              if (e.key === "Escape") setEditingEst(false);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="h-4 w-14 px-1 py-0 text-[10px] bg-[#111] border-orange-500/50 text-white flex-shrink-0"
+          />
+        ) : subtask.estimatedMinutes != null ? (
+          <Badge
+            variant="secondary"
+            onClick={startEstEdit}
+            className="h-4 px-1.5 text-[10px] bg-white/5 text-white/50 border-0 cursor-pointer hover:bg-orange-500/20 hover:text-orange-300 flex-shrink-0"
+          >
+            {formatMinutes(subtask.estimatedMinutes)}
+          </Badge>
+        ) : (
+          <button
+            onClick={startEstEdit}
+            className="opacity-0 group-hover/row:opacity-100 transition-opacity text-[10px] text-white/25 hover:text-white/50 flex-shrink-0 px-1"
+          >
+            est
+          </button>
+        )}
+
+        <button
+          onClick={onDelete}
+          className="opacity-0 group-hover/row:opacity-100 transition-opacity text-white/20 hover:text-red-400 flex-shrink-0 p-0.5"
+        >
+          <X size={11} />
+        </button>
+      </div>
+
+      {/* Expandable notes */}
+      <AnimatePresence initial={false}>
+        {notesOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden pl-[52px] pr-1 pb-1.5"
+          >
+            <Textarea
+              ref={notesRef}
+              value={notesDraft}
+              onChange={(e) => setNotesDraft(e.target.value)}
+              onBlur={saveNotes}
+              placeholder="Add notes…"
+              rows={3}
+              className="bg-[#0D0D0D] border-[#2A2A2A] focus:border-orange-500/30 text-white text-[11px] placeholder:text-white/20 resize-none w-full"
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -170,6 +269,8 @@ export default function TaskDetailPanel() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [subtaskInput, setSubtaskInput] = useState("");
   const [subtaskEstInput, setSubtaskEstInput] = useState("");
+  const [subtaskNotesInput, setSubtaskNotesInput] = useState("");
+  const [subtaskFormOpen, setSubtaskFormOpen] = useState(false);
   const subtaskInputRef = useRef<HTMLInputElement>(null);
 
   const subtaskSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -182,6 +283,8 @@ export default function TaskDetailPanel() {
       setConfirmDelete(false);
       setSubtaskInput("");
       setSubtaskEstInput("");
+      setSubtaskNotesInput("");
+      setSubtaskFormOpen(false);
       loadSubtasks(task.id);
     }
   }, [task?.id]);
@@ -244,16 +347,23 @@ export default function TaskDetailPanel() {
     selectTask(null);
   }
 
+  function resetSubtaskForm() {
+    setSubtaskInput("");
+    setSubtaskEstInput("");
+    setSubtaskNotesInput("");
+    setSubtaskFormOpen(false);
+  }
+
   async function handleAddSubtask() {
     if (!task) return;
     const trimmed = subtaskInput.trim();
     if (!trimmed) return;
-    setSubtaskInput("");
     const estFromField = parseEstimate(subtaskEstInput);
-    setSubtaskEstInput("");
     const { title: cleanTitle, est: estFromTitle } = extractEstFromTitle(trimmed);
     const est = estFromField ?? estFromTitle;
-    await addSubtask(task.id, cleanTitle, est);
+    const notes = subtaskNotesInput.trim() || null;
+    resetSubtaskForm();
+    await addSubtask(task.id, cleanTitle, est, notes);
   }
 
   function handleSubtaskDragEnd(event: DragEndEvent) {
@@ -490,6 +600,8 @@ export default function TaskDetailPanel() {
                             onToggle={() => toggleSubtask(task.id, subtask.id)}
                             onDelete={() => deleteSubtask(task.id, subtask.id)}
                             onUpdateEst={(est) => updateSubtask(task.id, subtask.id, { estimatedMinutes: est })}
+                            onUpdateTitle={(t) => updateSubtask(task.id, subtask.id, { title: t })}
+                            onUpdateNotes={(d) => updateSubtask(task.id, subtask.id, { description: d })}
                           />
                         </motion.div>
                       ))}
@@ -499,36 +611,67 @@ export default function TaskDetailPanel() {
               )}
 
               {/* Add subtask input */}
-              <div className="flex items-center gap-1.5 mt-1.5">
-                <Input
-                  ref={subtaskInputRef}
-                  value={subtaskInput}
-                  onChange={(e) => setSubtaskInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddSubtask();
-                    if (e.key === "Escape") setSubtaskInput("");
-                  }}
-                  placeholder="Add a subtask…"
-                  className="h-7 text-xs bg-[#1A1A1A] border-[#2A2A2A] focus:border-orange-500/50 text-white placeholder:text-white/25 min-w-0"
-                />
-                <Input
-                  value={subtaskEstInput}
-                  onChange={(e) => setSubtaskEstInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddSubtask();
-                    if (e.key === "Escape") setSubtaskEstInput("");
-                  }}
-                  placeholder="est"
-                  className="h-7 w-16 text-xs bg-[#1A1A1A] border-[#2A2A2A] focus:border-orange-500/50 text-white placeholder:text-white/25 flex-shrink-0"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleAddSubtask}
-                  className="h-7 w-7 flex-shrink-0 text-white/30 hover:text-orange-400 hover:bg-orange-500/10"
-                >
-                  <Plus size={13} />
-                </Button>
+              <div className="mt-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    ref={subtaskInputRef}
+                    value={subtaskInput}
+                    onChange={(e) => setSubtaskInput(e.target.value)}
+                    onFocus={() => setSubtaskFormOpen(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleAddSubtask();
+                      if (e.key === "Escape") resetSubtaskForm();
+                    }}
+                    placeholder="Add a subtask…"
+                    className="h-7 text-xs bg-[#1A1A1A] border-[#2A2A2A] focus:border-orange-500/50 text-white placeholder:text-white/25 min-w-0"
+                  />
+                  <Input
+                    value={subtaskEstInput}
+                    onChange={(e) => setSubtaskEstInput(e.target.value)}
+                    onFocus={() => setSubtaskFormOpen(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleAddSubtask();
+                      if (e.key === "Escape") resetSubtaskForm();
+                    }}
+                    placeholder="est"
+                    className="h-7 w-16 text-xs bg-[#1A1A1A] border-[#2A2A2A] focus:border-orange-500/50 text-white placeholder:text-white/25 flex-shrink-0"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleAddSubtask}
+                    className="h-7 w-7 flex-shrink-0 text-white/30 hover:text-orange-400 hover:bg-orange-500/10"
+                  >
+                    <Plus size={13} />
+                  </Button>
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {subtaskFormOpen && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="overflow-hidden"
+                    >
+                      <Textarea
+                        value={subtaskNotesInput}
+                        onChange={(e) => setSubtaskNotesInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            handleAddSubtask();
+                          }
+                          if (e.key === "Escape") resetSubtaskForm();
+                        }}
+                        placeholder="Notes (optional)…"
+                        rows={2}
+                        className="mt-1.5 bg-[#0D0D0D] border-[#2A2A2A] focus:border-orange-500/30 text-white text-[11px] placeholder:text-white/20 resize-none w-full"
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </div>
@@ -537,7 +680,10 @@ export default function TaskDetailPanel() {
           <div className="px-4 py-3 border-t border-[#2A2A2A] flex flex-col gap-2">
             <Button
               size="sm"
-              onClick={() => selectTask(null)}
+              onClick={async () => {
+                if (subtaskInput.trim()) await handleAddSubtask();
+                selectTask(null);
+              }}
               className="w-full text-xs bg-orange-500 hover:bg-orange-600 text-white"
             >
               Save

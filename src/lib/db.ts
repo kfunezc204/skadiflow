@@ -314,12 +314,13 @@ export async function createSubtask(
   title: string,
   status: string,
   position: number,
-  estimatedMinutes?: number | null
+  estimatedMinutes?: number | null,
+  description?: string | null
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "INSERT INTO tasks (id, list_id, title, status, position, parent_task_id, estimated_minutes) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-    [id, listId, title, status, position, parentId, estimatedMinutes ?? null]
+    "INSERT INTO tasks (id, list_id, title, description, status, position, parent_task_id, estimated_minutes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    [id, listId, title, description ?? null, status, position, parentId, estimatedMinutes ?? null]
   );
 }
 

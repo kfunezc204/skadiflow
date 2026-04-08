@@ -21,7 +21,7 @@ export type TimerSnapshot = {
   focusSound: string;
 };
 
-export type TimerAction = "pause" | "resume" | "skip" | "done" | "expand" | "exit" | "minimize-tray";
+export type TimerAction = "pause" | "resume" | "skip" | "done" | "subtask-done" | "expand" | "exit" | "minimize-tray";
 
 const TIMER_STATE_EVENT = "skadiflow:timer-state";
 const TIMER_ACTION_EVENT = "skadiflow:timer-action";
