@@ -287,8 +287,8 @@ export default function FocusOverlay({ onExit }: Props) {
                       <button
                         key={url}
                         onClick={() =>
-                          import("@tauri-apps/plugin-shell")
-                            .then(({ open }) => open(url))
+                          import("@tauri-apps/plugin-opener")
+                            .then(({ openUrl }) => openUrl(url))
                             .catch(console.warn)
                         }
                         className="text-[10px] text-orange-500/60 hover:text-orange-400 transition-colors underline underline-offset-2"

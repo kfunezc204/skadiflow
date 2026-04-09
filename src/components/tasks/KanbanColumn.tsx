@@ -42,7 +42,7 @@ export default function KanbanColumn({ status, title, tasks, accentColor }: Prop
   }
 
   return (
-    <div className="flex flex-col min-w-[280px] flex-1">
+    <div className="flex flex-col min-w-[280px] flex-1 min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between mb-3 px-1">
         <div className="flex items-center gap-2">
@@ -69,7 +69,7 @@ export default function KanbanColumn({ status, title, tasks, accentColor }: Prop
       {/* Drop zone */}
       <div
         ref={setNodeRef}
-        className={`flex-1 rounded-lg border transition-colors ${
+        className={`flex-1 min-h-0 rounded-lg border transition-colors ${
           isOver ? "border-orange-500/30 bg-orange-500/5" : "border-[#2A2A2A] bg-[#111111]"
         }`}
       >

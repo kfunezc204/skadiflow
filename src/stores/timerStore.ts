@@ -155,9 +155,9 @@ async function openTaskUrls(taskId: string) {
     ].filter(Boolean).join(" ");
     const urls = extractUrls(text);
     if (urls.length === 0) return;
-    const { open } = await import("@tauri-apps/plugin-shell");
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
     for (const url of urls) {
-      open(url).catch(console.warn);
+      openUrl(url).catch(console.warn);
     }
   } catch (e) {
     console.warn("openTaskUrls failed:", e);
@@ -176,9 +176,9 @@ async function openSubtaskUrls(taskId: string, subtaskIndex: number) {
     const text = [sub.title, sub.description].filter(Boolean).join(" ");
     const urls = extractUrls(text);
     if (urls.length === 0) return;
-    const { open } = await import("@tauri-apps/plugin-shell");
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
     for (const url of urls) {
-      open(url).catch(console.warn);
+      openUrl(url).catch(console.warn);
     }
   } catch (e) {
     console.warn("openSubtaskUrls failed:", e);
@@ -256,20 +256,21 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
 
     startInterval();
 
-    if (shouldLock) {
-      await activateLocker();
-    }
-
     await get().persistState();
     await get().broadcastCurrentState();
 
-    // Auto-show floating timer and minimize main window
+    // Show floating timer immediately before activating locker (avoid UI freeze)
     try {
       const { showFloatingTimer, hideMainWindow } = await import("@/lib/windowManager");
       await showFloatingTimer();
       await hideMainWindow();
     } catch (e) {
       console.warn("Auto-show floating timer on session start failed:", e);
+    }
+
+    // Activate locker after UI is already visible (hosts file write + async DNS flush)
+    if (shouldLock) {
+      activateLocker().catch(console.warn);
     }
   },
 

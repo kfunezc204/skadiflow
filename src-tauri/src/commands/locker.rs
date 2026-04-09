@@ -65,18 +65,18 @@ pub fn activate_locker(domains: Vec<String>) -> Result<(), String> {
     let new_content = clean + &block;
     fs::write(&path, new_content).map_err(|e| e.to_string())?;
 
-    // Flush OS DNS cache so new entries take effect immediately
+    // Flush OS DNS cache in the background so the UI is not blocked
     #[cfg(target_os = "windows")]
     {
         let _ = std::process::Command::new("ipconfig")
             .args(["/flushdns"])
-            .output();
+            .spawn();
     }
     #[cfg(not(target_os = "windows"))]
     {
         let _ = std::process::Command::new("dscacheutil")
             .args(["-flushcache"])
-            .output();
+            .spawn();
     }
 
     Ok(())
