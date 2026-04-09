@@ -206,10 +206,10 @@ export default function FocusOverlay({ onExit }: Props) {
           <button
             onClick={() => useTimerStore.getState().minimizeFocusToTray().catch(console.warn)}
             className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
-            title="Minimizar ventana al tray"
+            title="Minimize window to tray"
           >
             <MonitorOff size={12} />
-            <span className="hidden sm:inline">Minimizar ventana</span>
+            <span className="hidden sm:inline">Minimize</span>
           </button>
 
           {/* Minimize to floating */}

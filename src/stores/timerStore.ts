@@ -346,7 +346,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
           console.warn("Subtask chime failed:", e);
         }
         for (const title of completedTitles) {
-          toast(`✅ "${title}" completada`);
+          toast(`✅ "${title}" completed`);
         }
       }
 
@@ -493,7 +493,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     }
 
     const completedTitle =
-      useTaskStore.getState().tasks.find((t) => t.id === state.activeTaskId)?.title ?? "Tarea";
+      useTaskStore.getState().tasks.find((t) => t.id === state.activeTaskId)?.title ?? "Task";
 
     await syncTaskActualMinutes(state.activeTaskId);
     await useTaskStore.getState().completeTask(state.activeTaskId);
@@ -513,8 +513,8 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       try {
         const { sendNotification } = await import("@tauri-apps/plugin-notification");
         await sendNotification({
-          title: "🎉 ¡Sesión completa!",
-          body: `"${completedTitle}" fue la última tarea.`,
+          title: "🎉 Session complete!",
+          body: `"${completedTitle}" was the last task.`,
         });
       } catch (e) {
         console.warn("Notification failed:", e);
@@ -525,21 +525,21 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     }
 
     const nextTitle =
-      useTaskStore.getState().tasks.find((t) => t.id === nextTask)?.title ?? "Siguiente tarea";
+      useTaskStore.getState().tasks.find((t) => t.id === nextTask)?.title ?? "Next task";
 
     // System notification — visible even when minimized or in tray
     try {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
       await sendNotification({
-        title: `✅ "${completedTitle}" completada`,
-        body: `Ahora trabajando en: "${nextTitle}"`,
+        title: `✅ "${completedTitle}" completed`,
+        body: `Now working on: "${nextTitle}"`,
       });
     } catch (e) {
       console.warn("Notification failed:", e);
     }
 
     // In-app toast for when the window is visible
-    toast(`✅ "${completedTitle}" lista → Ahora: "${nextTitle}"`);
+    toast(`✅ "${completedTitle}" done → Now: "${nextTitle}"`);
 
     set({
       activeTaskId: nextTask,
@@ -595,7 +595,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       console.warn("Chime failed:", e);
     }
 
-    toast(`✅ "${currentSub.title}" completada`);
+    toast(`✅ "${currentSub.title}" completed`);
 
     // Find next pending subtask (from old list — everything after pendingIdx)
     const nextPendingIdx = subtaskList.findIndex((s, i) => i > pendingIdx && s.completedAt === null);

@@ -15,15 +15,15 @@ export default function TimerControls({ onExit }: Props) {
 
   const isRunning = status === "running";
   const doneLabel = activeSubtaskTitle
-    ? "Completar subtarea actual (D)"
-    : "Marcar tarea como completada (D)";
+    ? "Complete current subtask (D)"
+    : "Mark task as done (D)";
 
   return (
     <div className="flex items-center gap-3">
       {/* Pause / Resume */}
       <Button
         onClick={isRunning ? pause : resume}
-        title={isRunning ? "Pausar (Space)" : "Reanudar (Space)"}
+        title={isRunning ? "Pause (Space)" : "Resume (Space)"}
         className="h-12 w-12 rounded-full bg-orange-500 hover:bg-orange-600 text-white p-0"
       >
         {isRunning ? <Pause size={20} /> : <Play size={20} />}
@@ -33,7 +33,7 @@ export default function TimerControls({ onExit }: Props) {
       <Button
         variant="outline"
         onClick={skip}
-        title="Saltar intervalo (S)"
+        title="Skip interval (S)"
         className="h-10 w-10 rounded-full border-white/20 bg-transparent text-white/60 hover:text-white hover:bg-white/10 p-0"
       >
         <SkipForward size={16} />
@@ -56,7 +56,7 @@ export default function TimerControls({ onExit }: Props) {
       <Button
         variant="ghost"
         onClick={onExit}
-        title="Salir de la sesión (Esc)"
+        title="Exit session (Esc)"
         className="h-10 w-10 rounded-full text-white/30 hover:text-white/60 hover:bg-white/10 p-0"
       >
         <LogOut size={16} />

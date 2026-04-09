@@ -132,14 +132,14 @@ export default function FloatingTimer() {
                   ? sendTimerAction("pause").catch(console.warn)
                   : sendTimerAction("resume").catch(console.warn)
               }
-              title={snapshot.status === "running" ? "Pausar (Space)" : "Reanudar (Space)"}
+              title={snapshot.status === "running" ? "Pause (Space)" : "Resume (Space)"}
               className="h-6 w-6 flex items-center justify-center rounded text-white/50 hover:text-white hover:bg-white/10 transition-colors"
             >
               {snapshot.status === "running" ? <Pause size={11} /> : <Play size={11} />}
             </button>
             <button
               onClick={() => sendTimerAction("skip").catch(console.warn)}
-              title="Saltar intervalo (S)"
+              title="Skip interval (S)"
               className="h-6 w-6 flex items-center justify-center rounded text-white/50 hover:text-white hover:bg-white/10 transition-colors"
             >
               <SkipForward size={11} />
@@ -147,7 +147,7 @@ export default function FloatingTimer() {
             {snapshot.phase === "focus" && (
               <button
                 onClick={() => sendTimerAction("subtask-done").catch(console.warn)}
-                title={snapshot.currentSubtaskTitle ? "Completar subtarea actual (D)" : "Marcar tarea como completada (D)"}
+                title={snapshot.currentSubtaskTitle ? "Complete current subtask (D)" : "Mark task as done (D)"}
                 className="h-6 w-6 flex items-center justify-center rounded text-white/50 hover:text-green-400 hover:bg-white/10 transition-colors"
               >
                 <CheckCheck size={11} />
@@ -155,21 +155,21 @@ export default function FloatingTimer() {
             )}
             <button
               onClick={() => sendTimerAction("expand").catch(console.warn)}
-              title="Expandir ventana"
+              title="Expand window"
               className="h-6 w-6 flex items-center justify-center rounded text-white/50 hover:text-white hover:bg-white/10 transition-colors"
             >
               <Maximize2 size={11} />
             </button>
             <button
               onClick={() => sendTimerAction("minimize-tray").catch(console.warn)}
-              title="Minimizar al tray"
+              title="Minimize to tray"
               className="h-6 w-6 flex items-center justify-center rounded text-white/50 hover:text-white hover:bg-white/10 transition-colors"
             >
               <MonitorOff size={11} />
             </button>
             <button
               onClick={() => sendTimerAction("exit").catch(console.warn)}
-              title="Terminar sesión"
+              title="End session"
               className="h-6 w-6 flex items-center justify-center rounded text-white/50 hover:text-orange-400 hover:bg-white/10 transition-colors"
             >
               <X size={11} />
