@@ -1,12 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { HashRouter } from "react-router-dom";
 import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import "./index.css";
 
 // Mark floating-timer window immediately — before React renders.
-if (window.location.pathname === "/floating-timer") {
+// With HashRouter, the route is in window.location.hash (e.g. "#/floating-timer")
+if (window.location.hash === "#/floating-timer") {
   document.documentElement.classList.add("floating-timer-window");
   // Remove "dark" — forces color-scheme:dark which makes WebView2 paint an opaque background.
   document.documentElement.classList.remove("dark");
@@ -18,9 +19,9 @@ if (window.location.pathname === "/floating-timer") {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <BrowserRouter>
+      <HashRouter>
         <App />
-      </BrowserRouter>
+      </HashRouter>
     </ErrorBoundary>
   </React.StrictMode>,
 );

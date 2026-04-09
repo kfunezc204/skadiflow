@@ -12,6 +12,8 @@ import {
 } from "@/lib/db";
 import { invoke } from "@tauri-apps/api/core";
 import { broadcastTimerState } from "@/lib/timerBridge";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { extractUrls } from "@/lib/urlUtils";
 
 export type TimerPhase = "focus" | "short_break" | "long_break";
 export type TimerStatus = "idle" | "running" | "paused";
@@ -142,7 +144,6 @@ async function openTaskUrls(taskId: string) {
   try {
     const { autoOpenLinks } = useSettingsStore.getState();
     if (!autoOpenLinks) return;
-    const { extractUrls } = await import("@/lib/urlUtils");
     const storeState = useTaskStore.getState();
     const task = storeState.tasks.find((t) => t.id === taskId);
     const subs = storeState.subtasks[taskId] ?? [];
@@ -155,9 +156,8 @@ async function openTaskUrls(taskId: string) {
     ].filter(Boolean).join(" ");
     const urls = extractUrls(text);
     if (urls.length === 0) return;
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
     for (const url of urls) {
-      openUrl(url).catch(console.warn);
+      openUrl(url).catch((e) => console.warn("openUrl failed:", url, e));
     }
   } catch (e) {
     console.warn("openTaskUrls failed:", e);
@@ -169,16 +169,14 @@ async function openSubtaskUrls(taskId: string, subtaskIndex: number) {
   try {
     const { autoOpenLinks } = useSettingsStore.getState();
     if (!autoOpenLinks) return;
-    const { extractUrls } = await import("@/lib/urlUtils");
     const subs = useTaskStore.getState().subtasks[taskId] ?? [];
     const sub = subs[subtaskIndex];
     if (!sub) return;
     const text = [sub.title, sub.description].filter(Boolean).join(" ");
     const urls = extractUrls(text);
     if (urls.length === 0) return;
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
     for (const url of urls) {
-      openUrl(url).catch(console.warn);
+      openUrl(url).catch((e) => console.warn("openUrl failed:", url, e));
     }
   } catch (e) {
     console.warn("openSubtaskUrls failed:", e);

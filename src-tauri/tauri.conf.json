@@ -25,7 +25,7 @@
       {
         "label": "floating-timer",
         "title": "SkadiFlow Timer",
-        "url": "/floating-timer",
+        "url": "/#/floating-timer",
         "width": 340,
         "height": 88,
         "minWidth": 340,
@@ -40,7 +40,7 @@
       {
         "label": "task-toast",
         "title": "SkadiFlow Notification",
-        "url": "/task-toast",
+        "url": "/#/task-toast",
         "width": 360,
         "height": 84,
         "minWidth": 360,

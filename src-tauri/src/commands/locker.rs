@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-const SENTINEL_START: &str = "# BLITZDESK-LOCKER-START";
-const SENTINEL_END: &str = "# BLITZDESK-LOCKER-END";
+const SENTINEL_START: &str = "# SKADIFLOW-LOCKER-START";
+const SENTINEL_END: &str = "# SKADIFLOW-LOCKER-END";
 
 fn hosts_file_path() -> PathBuf {
     #[cfg(target_os = "windows")]

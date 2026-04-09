@@ -22,13 +22,13 @@ export default function App() {
   useEffect(() => {
     useSettingsStore.getState().loadSettings().then(() => {
       // Only the main window runs the timer — floating window is a passive display
-      if (window.location.pathname !== "/floating-timer" && window.location.pathname !== "/task-toast") {
+      if (window.location.hash !== "#/floating-timer" && window.location.hash !== "#/task-toast") {
         useTimerStore.getState().loadPersistedTimer();
       }
     });
 
     // Only the main window listens for timer actions from the floating window
-    if (window.location.pathname !== "/floating-timer" && window.location.pathname !== "/task-toast") {
+    if (window.location.hash !== "#/floating-timer" && window.location.hash !== "#/task-toast") {
       useTimerStore.getState().initTimerActionListener().then((unlisten) => {
         actionListenerCleanup.current = unlisten;
       });
@@ -39,8 +39,8 @@ export default function App() {
     };
   }, []);
 
-  const isFloating = window.location.pathname === "/floating-timer";
-  const isTaskToast = window.location.pathname === "/task-toast";
+  const isFloating = window.location.hash === "#/floating-timer";
+  const isTaskToast = window.location.hash === "#/task-toast";
 
   if (!isLoaded) {
     if (isFloating || isTaskToast) return null;
