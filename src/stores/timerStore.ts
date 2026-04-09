@@ -694,6 +694,24 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       if (state.isLockerEnabled && !settings.lockerDuringBreaks) {
         await deactivateLockerSafe();
       }
+
+      // Play descending chime to signal break time
+      try {
+        const { playBreakStartChime } = await import("@/lib/audioManager");
+        playBreakStartChime(settings.focusSoundVolume / 100);
+      } catch (e) {
+        console.warn("Break chime failed:", e);
+      }
+
+      // Focus ended → break starting: bring app to front so user sees the break prompt
+      try {
+        const { bringMainWindowToFront, hideFloatingTimer } = await import("@/lib/windowManager");
+        await hideFloatingTimer();
+        set({ isTrayMinimized: false });
+        await bringMainWindowToFront();
+      } catch (e) {
+        console.warn("breakAlert failed:", e);
+      }
     } else {
       // Break ended → start next focus
       const total = getPhaseSeconds("focus");
@@ -721,16 +739,23 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
           status: "paused",
         });
       }
-    }
 
-    // Restore window if user had minimized to tray — phase transition needs attention
-    if (state.isTrayMinimized) {
-      set({ isTrayMinimized: false });
+      // Play ascending chime to signal focus time
       try {
-        const { showMainWindow } = await import("@/lib/windowManager");
-        await showMainWindow();
+        const { playFocusStartChime } = await import("@/lib/audioManager");
+        playFocusStartChime(settings.focusSoundVolume / 100);
       } catch (e) {
-        console.warn("restoreFromTray failed:", e);
+        console.warn("Focus chime failed:", e);
+      }
+
+      // Break ended → focus starting: bring app to front so user resumes work
+      try {
+        const { bringMainWindowToFront, hideFloatingTimer } = await import("@/lib/windowManager");
+        await hideFloatingTimer();
+        set({ isTrayMinimized: false });
+        await bringMainWindowToFront();
+      } catch (e) {
+        console.warn("focusAlert failed:", e);
       }
     }
 

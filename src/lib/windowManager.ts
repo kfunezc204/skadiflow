@@ -69,3 +69,17 @@ export async function minimizeFocusToTray(): Promise<void> {
   await hideFloatingTimer();
   await hideMainWindow();
 }
+
+// Brings the main window above all other apps regardless of its current state
+// (hidden, minimized, or simply in the background).
+export async function bringMainWindowToFront(): Promise<void> {
+  try {
+    const win = await WebviewWindow.getByLabel("main");
+    if (!win) return;
+    await win.show();        // no-op if already visible
+    await win.unminimize();  // no-op if not minimized
+    await win.setFocus();    // elevate above all other windows
+  } catch (e) {
+    console.warn("bringMainWindowToFront failed:", e);
+  }
+}
