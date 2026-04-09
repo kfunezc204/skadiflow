@@ -1,6 +1,6 @@
 export function extractUrls(text: string): string[] {
   const withProtocol = /https?:\/\/[^\s<>"{}|\\^`[\]]+/g;
-  const withoutProtocol = /(?<![/\w])(?:www\.)?[\w-]+\.(?:com|org|net|io|dev|app|co|ai|me|tv|gg|xyz|info|edu|gov)\b(?:\/[^\s<>"{}|\\^`[\]]*)?/g;
+  const withoutProtocol = /(?<![./\w])(?:www\.)?[\w-]+\.(?:com|org|net|io|dev|app|co|ai|me|tv|gg|xyz|info|edu|gov)\b(?:\/[^\s<>"{}|\\^`[\]]*)?/g;
 
   const results = new Set<string>();
 
