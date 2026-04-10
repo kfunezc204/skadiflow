@@ -98,12 +98,19 @@ async function activateLocker() {
   try {
     const { useLockerStore } = await import("@/stores/lockerStore");
     const domains = useLockerStore.getState().blockedDomains;
-    if (domains.length > 0) {
-      await invoke("activate_locker", { domains });
-    }
+    if (domains.length === 0) return;
+
+    // Primary: local proxy (no admin needed, works immediately)
+    const msg = await invoke<string>("activate_proxy_blocker", { domains });
+    console.log("[Locker]", msg);
+
+    // Secondary: try hosts file + firewall (needs admin, may fail silently)
+    invoke("activate_locker", { domains }).catch((e) =>
+      console.log("[Locker] hosts/firewall layer skipped (no admin):", e)
+    );
   } catch (e) {
     console.warn("Locker activation failed:", e);
-    toast.error("Website blocker failed — run SkadiFlow as administrator");
+    toast.error("Website blocker failed to start");
   }
 }
 
@@ -184,10 +191,17 @@ async function openSubtaskUrls(taskId: string, subtaskIndex: number) {
 }
 
 async function deactivateLockerSafe() {
+  // Primary: disable proxy (always succeeds)
+  try {
+    await invoke("deactivate_proxy_blocker");
+  } catch (e) {
+    console.warn("Proxy deactivation failed:", e);
+  }
+  // Secondary: clean up hosts/firewall (may fail without admin)
   try {
     await invoke("deactivate_locker");
   } catch (e) {
-    console.warn("Locker deactivation failed:", e);
+    console.warn("Hosts/firewall cleanup skipped:", e);
   }
 }
 
@@ -404,6 +418,11 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     const sessionId = crypto.randomUUID();
     const now = new Date().toISOString();
     await dbCreateSession(sessionId, state.activeTaskId, phaseToSessionType(state.phase), now);
+
+    // Re-activate locker when resuming into a focus phase
+    if (state.phase === "focus" && state.isLockerEnabled) {
+      activateLocker().catch(console.warn);
+    }
 
     set({ status: "running", activeSessionId: sessionId });
     startInterval();

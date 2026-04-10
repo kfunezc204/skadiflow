@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, ChevronUp, ChevronDown, Timer as TimerIcon, ShieldCheck, ShieldOff, AlertTriangle } from "lucide-react";
+import { Play, ChevronUp, ChevronDown, Timer as TimerIcon, ShieldCheck, ShieldOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTimerStore } from "@/stores/timerStore";
 import { useTaskStore, useTasksByColumn } from "@/stores/taskStore";
@@ -154,6 +154,7 @@ export default function FocusPage() {
 
   async function handleStart() {
     if (selectedIds.length === 0) return;
+    // Proxy-based blocker doesn't need admin — always allow start
     await startFocusSession(selectedIds, lockerEnabled);
     minimizeToFloating().catch(console.warn);
   }
@@ -258,12 +259,6 @@ export default function FocusPage() {
                 )}
               </button>
 
-              {lockerEnabled && hasLockerPermission === false && (
-                <div className="flex items-center gap-1.5 text-[11px] text-amber-400/80">
-                  <AlertTriangle size={11} className="flex-shrink-0" />
-                  No permission — run SkadiFlow as administrator to block sites
-                </div>
-              )}
             </div>
           )}
 

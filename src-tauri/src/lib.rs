@@ -44,6 +44,8 @@ pub fn run() {
             commands::locker::check_locker_permission,
             commands::locker::activate_locker,
             commands::locker::deactivate_locker,
+            commands::proxy_blocker::activate_proxy_blocker,
+            commands::proxy_blocker::deactivate_proxy_blocker,
         ])
         .setup(|app| {
             let show_hide = MenuItem::with_id(app, "show_hide", "Show / Hide", true, None::<&str>)?;
@@ -78,6 +80,7 @@ pub fn run() {
                             let _ = window.emit("quick-add", ());
                         }
                         "quit" => {
+                            let _ = commands::proxy_blocker::deactivate_proxy_blocker();
                             app.exit(0);
                         }
                         _ => {}
@@ -111,11 +114,25 @@ pub fn run() {
                 let _ = webview.set_background_color(Some(Color(0, 0, 0, 0)));
             }
 
+            // Clean up stale proxy settings from a previous crash
+            #[cfg(target_os = "windows")]
+            commands::proxy_blocker::cleanup_stale_proxy();
+
+            // Start the local blocking proxy server (runs on tokio runtime)
+            tauri::async_runtime::spawn(async {
+                match commands::proxy_blocker::start_server().await {
+                    Ok(port) => eprintln!("[SkadiFlow] Proxy blocker ready on 127.0.0.1:{}", port),
+                    Err(e) => eprintln!("[SkadiFlow] Proxy blocker failed to start: {}", e),
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    // Restore proxy settings before exit to avoid leaving a dead proxy
+                    let _ = commands::proxy_blocker::deactivate_proxy_blocker();
                     window.app_handle().exit(0);
                 }
             }
