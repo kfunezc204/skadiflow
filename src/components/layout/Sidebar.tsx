@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import MiniTimer from "@/components/focus/MiniTimer";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   Timer,
@@ -32,9 +32,15 @@ const navItems = [
 
 
 export default function Sidebar() {
+  const navigate = useNavigate();
   const lists = useListStore((s) => s.lists);
   const selectedListId = useListStore((s) => s.selectedListId);
   const selectList = useListStore((s) => s.selectList);
+
+  function goToList(listId: string | null) {
+    selectList(listId);
+    navigate("/");
+  }
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingList, setEditingList] = useState<List | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<List | null>(null);
@@ -84,7 +90,7 @@ export default function Sidebar() {
 
         {/* All Tasks */}
         <button
-          onClick={() => selectList(null)}
+          onClick={() => goToList(null)}
           className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors ${
             selectedListId === null
               ? "bg-orange-500/10 text-orange-500 font-medium"
@@ -108,7 +114,7 @@ export default function Sidebar() {
             className="group flex items-center"
           >
             <button
-              onClick={() => selectList(list.id)}
+              onClick={() => goToList(list.id)}
               className={`flex flex-1 items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors min-w-0 ${
                 selectedListId === list.id
                   ? "bg-orange-500/10 text-orange-400 font-medium"

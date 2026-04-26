@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -19,6 +20,8 @@ type Props = {
 export default function InlineTaskAdd({ status }: Props) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
+  const [notesInput, setNotesInput] = useState("");
+  const [notesFormOpen, setNotesFormOpen] = useState(false);
   const [pickedListId, setPickedListId] = useState<string | null>(null);
   const selectOpenRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -37,26 +40,31 @@ export default function InlineTaskAdd({ status }: Props) {
     setTimeout(() => inputRef.current?.focus(), 0);
   }
 
+  function resetForm() {
+    setOpen(false);
+    setValue("");
+    setNotesInput("");
+    setNotesFormOpen(false);
+  }
+
   async function submit() {
     const trimmed = value.trim();
     if (!trimmed) {
-      setOpen(false);
-      setValue("");
+      resetForm();
       return;
     }
     const { title, est } = extractEstFromTitle(trimmed);
-    await addTask(title, status, selectedListId ?? effectiveListId, est);
+    const notes = notesInput.trim() || null;
+    await addTask(title, status, selectedListId ?? effectiveListId, est, notes);
     setValue("");
+    setNotesInput("");
     // Keep open for rapid entry
     setTimeout(() => inputRef.current?.focus(), 0);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter") submit();
-    if (e.key === "Escape") {
-      setOpen(false);
-      setValue("");
-    }
+    if (e.key === "Escape") resetForm();
   }
 
   // Listen for quick-add DOM event (dispatched centrally by AppShell) — only "today" column responds
@@ -81,61 +89,90 @@ export default function InlineTaskAdd({ status }: Props) {
           >
             <div
               ref={containerRef}
-              className="flex gap-1.5"
+              className="flex flex-col"
               onBlur={(e) => {
                 if (selectOpenRef.current) return;
                 if (!containerRef.current?.contains(e.relatedTarget as Node)) {
-                  if (!value.trim()) {
-                    setOpen(false);
-                    setValue("");
-                  }
+                  if (!value.trim()) resetForm();
                 }
               }}
             >
-              {selectedListId === null && (
-                <Select
-                  value={effectiveListId}
-                  onValueChange={(v) => {
-                    if (v) setPickedListId(v);
-                    setTimeout(() => inputRef.current?.focus(), 0);
+              {/* Row 1: List picker + Title input */}
+              <div className="flex gap-1.5">
+                {selectedListId === null && (
+                  <Select
+                    value={effectiveListId}
+                    onValueChange={(v) => {
+                      if (v) setPickedListId(v);
+                      setTimeout(() => inputRef.current?.focus(), 0);
+                    }}
+                    onOpenChange={(o) => {
+                      selectOpenRef.current = o;
+                    }}
+                  >
+                    <SelectTrigger className="w-[120px] h-8 text-xs bg-[#111] border-[#2A2A2A] text-white/60 flex-shrink-0">
+                      <span className="truncate">
+                        {lists.find((l) => l.id === effectiveListId)?.name ?? "Select list"}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
+                      {lists.map((l) => (
+                        <SelectItem key={l.id} value={l.id} className="text-xs text-white/70 focus:text-white focus:bg-white/10">
+                          {l.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Input
+                  ref={inputRef}
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  onFocus={() => setNotesFormOpen(true)}
+                  onKeyDown={handleKeyDown}
+                  onPaste={(e: React.ClipboardEvent<HTMLInputElement>) => {
+                    const text = e.clipboardData.getData("text");
+                    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+                    if (lines.length <= 1) return; // single line — normal paste
+                    e.preventDefault();
+                    const listId = selectedListId ?? effectiveListId;
+                    lines.forEach((line) => {
+                      const { title, est } = extractEstFromTitle(line);
+                      addTask(title, status, listId, est);
+                    });
                   }}
-                  onOpenChange={(o) => {
-                    selectOpenRef.current = o;
-                  }}
-                >
-                  <SelectTrigger className="w-[120px] h-8 text-xs bg-[#111] border-[#2A2A2A] text-white/60 flex-shrink-0">
-                    <span className="truncate">
-                      {lists.find((l) => l.id === effectiveListId)?.name ?? "Select list"}
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#1A1A1A] border-[#2A2A2A] text-white">
-                    {lists.map((l) => (
-                      <SelectItem key={l.id} value={l.id} className="text-xs text-white/70 focus:text-white focus:bg-white/10">
-                        {l.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Input
-                ref={inputRef}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onPaste={(e: React.ClipboardEvent<HTMLInputElement>) => {
-                  const text = e.clipboardData.getData("text");
-                  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-                  if (lines.length <= 1) return; // single line — normal paste
-                  e.preventDefault();
-                  const listId = selectedListId ?? effectiveListId;
-                  lines.forEach((line) => {
-                    const { title, est } = extractEstFromTitle(line);
-                    addTask(title, status, listId, est);
-                  });
-                }}
-                placeholder="Task title… (append 30m for estimate)"
-                className="h-8 text-sm bg-[#111] border-[#2A2A2A] focus:border-orange-500/50 text-white placeholder:text-white/25"
-              />
+                  placeholder="Task title… (append 30m for estimate)"
+                  className="h-8 text-sm bg-[#111] border-[#2A2A2A] focus:border-orange-500/50 text-white placeholder:text-white/25"
+                />
+              </div>
+
+              {/* Row 2: Notes textarea (expandable on focus) */}
+              <AnimatePresence initial={false}>
+                {notesFormOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="overflow-hidden"
+                  >
+                    <Textarea
+                      value={notesInput}
+                      onChange={(e) => setNotesInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          submit();
+                        }
+                        if (e.key === "Escape") resetForm();
+                      }}
+                      placeholder="Notes (optional)…"
+                      rows={2}
+                      className="mt-1 bg-[#0D0D0D] border-[#2A2A2A] focus:border-orange-500/30 text-white text-sm placeholder:text-white/25 resize-none w-full"
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
         ) : (

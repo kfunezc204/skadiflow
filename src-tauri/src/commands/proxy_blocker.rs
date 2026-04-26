@@ -450,3 +450,133 @@ pub fn deactivate_proxy_blocker() -> Result<(), String> {
 
     Ok(())
 }
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_set(domains: &[&str]) -> Arc<RwLock<HashSet<String>>> {
+        let set: HashSet<String> = domains.iter().map(|s| s.to_string()).collect();
+        Arc::new(RwLock::new(set))
+    }
+
+    // ── parse_host_port ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_host_port_returns_default_when_no_port_given() {
+        let (host, port) = parse_host_port("example.com", 443);
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 443);
+    }
+
+    #[test]
+    fn parse_host_port_extracts_explicit_port() {
+        let (host, port) = parse_host_port("example.com:8080", 443);
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 8080);
+    }
+
+    #[test]
+    fn parse_host_port_handles_ipv6_with_brackets() {
+        let (host, port) = parse_host_port("[::1]:8443", 443);
+        assert_eq!(host, "[::1]");
+        assert_eq!(port, 8443);
+    }
+
+    #[test]
+    fn parse_host_port_falls_back_when_port_unparseable() {
+        let (host, port) = parse_host_port("example.com:notaport", 443);
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 443);
+    }
+
+    // ── extract_http_host ────────────────────────────────────────────
+
+    #[test]
+    fn extract_http_host_reads_absolute_url() {
+        let req = "GET http://example.com/path HTTP/1.1\r\nHost: other.com\r\n\r\n";
+        assert_eq!(extract_http_host(req, "http://example.com/path"), "example.com");
+    }
+
+    #[test]
+    fn extract_http_host_strips_port_from_absolute_url() {
+        let req = "GET http://example.com:8080/ HTTP/1.1\r\n\r\n";
+        assert_eq!(extract_http_host(req, "http://example.com:8080/"), "example.com");
+    }
+
+    #[test]
+    fn extract_http_host_falls_back_to_host_header_for_relative_path() {
+        let req = "GET /path HTTP/1.1\r\nHost: example.com\r\n\r\n";
+        assert_eq!(extract_http_host(req, "/path"), "example.com");
+    }
+
+    #[test]
+    fn extract_http_host_returns_lowercase() {
+        let req = "GET / HTTP/1.1\r\nHost: Example.COM\r\n\r\n";
+        assert_eq!(extract_http_host(req, "/"), "example.com");
+    }
+
+    #[test]
+    fn extract_http_host_returns_empty_when_no_host_available() {
+        assert_eq!(extract_http_host("GET / HTTP/1.1\r\n\r\n", "/"), "");
+    }
+
+    // ── is_blocked_by ────────────────────────────────────────────────
+
+    #[test]
+    fn is_blocked_by_matches_exact_domain() {
+        let set = make_set(&["youtube.com"]);
+        assert!(is_blocked_by("youtube.com", &set));
+    }
+
+    #[test]
+    fn is_blocked_by_strips_www_prefix_from_host() {
+        let set = make_set(&["youtube.com"]);
+        assert!(is_blocked_by("www.youtube.com", &set));
+    }
+
+    #[test]
+    fn is_blocked_by_matches_subdomains() {
+        let set = make_set(&["youtube.com"]);
+        assert!(is_blocked_by("m.youtube.com", &set));
+        assert!(is_blocked_by("music.youtube.com", &set));
+    }
+
+    #[test]
+    fn is_blocked_by_is_case_insensitive() {
+        let set = make_set(&["youtube.com"]);
+        assert!(is_blocked_by("YouTube.COM", &set));
+    }
+
+    #[test]
+    fn is_blocked_by_does_not_match_unrelated_domains() {
+        let set = make_set(&["youtube.com"]);
+        assert!(!is_blocked_by("notyoutube.com", &set));
+        assert!(!is_blocked_by("example.com", &set));
+    }
+
+    #[test]
+    fn is_blocked_by_returns_false_when_blocklist_is_empty() {
+        let set = make_set(&[]);
+        assert!(!is_blocked_by("youtube.com", &set));
+    }
+
+    // ── extract_port_from_url ────────────────────────────────────────
+
+    #[test]
+    fn extract_port_from_url_defaults_to_80_for_http_without_port() {
+        assert_eq!(extract_port_from_url("http://example.com/path"), Some(80));
+    }
+
+    #[test]
+    fn extract_port_from_url_reads_explicit_port() {
+        assert_eq!(extract_port_from_url("http://example.com:8080/path"), Some(8080));
+    }
+
+    #[test]
+    fn extract_port_from_url_returns_none_for_relative_url() {
+        assert_eq!(extract_port_from_url("/path"), None);
+    }
+}

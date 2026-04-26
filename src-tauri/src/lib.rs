@@ -64,7 +64,14 @@ pub fn run() {
                 .menu(&menu)
                 .menu_on_left_click(false)
                 .on_menu_event(|app, event| {
-                    let window = app.get_webview_window("main").unwrap();
+                    let Some(window) = app.get_webview_window("main") else {
+                        // Quit still works without the main window
+                        if event.id().as_ref() == "quit" {
+                            let _ = commands::proxy_blocker::deactivate_proxy_blocker();
+                            app.exit(0);
+                        }
+                        return;
+                    };
                     match event.id().as_ref() {
                         "show_hide" => {
                             if window.is_visible().unwrap_or(false) {

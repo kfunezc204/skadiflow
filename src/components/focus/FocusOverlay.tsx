@@ -281,6 +281,16 @@ export default function FocusOverlay({ onExit }: Props) {
                   )}
                 </AnimatePresence>
 
+                {/* Notes / Description */}
+                {activeTask?.description && (
+                  <p
+                    className="mt-2 text-xs text-white/40 whitespace-pre-wrap break-words select-text max-h-32 overflow-y-auto scrollbar-none"
+                    onContextMenu={(e) => e.stopPropagation()}
+                  >
+                    {activeTask.description}
+                  </p>
+                )}
+
                 {/* URL links */}
                 {taskUrls.length > 0 && (
                   <div className="flex flex-wrap justify-center gap-2 mt-2">

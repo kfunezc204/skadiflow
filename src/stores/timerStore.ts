@@ -400,7 +400,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       const now = new Date().toISOString();
       const totalSec = getPhaseSeconds(state.phase);
       const elapsed = totalSec - state.secondsRemaining;
-      await dbEndSession(state.activeSessionId, now, Math.max(1, Math.round(elapsed / 60)));
+      await dbEndSession(state.activeSessionId, now, Math.round(elapsed / 60));
       if (state.phase === "focus") {
         await syncTaskActualMinutes(state.activeTaskId);
       }
@@ -441,7 +441,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       const now = new Date().toISOString();
       const totalSec = getPhaseSeconds(state.phase);
       const elapsed = totalSec - state.secondsRemaining;
-      await dbEndSession(state.activeSessionId, now, Math.max(1, Math.round(elapsed / 60)));
+      await dbEndSession(state.activeSessionId, now, Math.round(elapsed / 60));
       set({ activeSessionId: null });
     }
 
@@ -648,15 +648,10 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     const state = get();
     const settings = useSettingsStore.getState();
 
-    // Log completed interval
+    // Log completed interval — phase reached 0, so record the full configured duration
     if (state.activeSessionId) {
       const now = new Date().toISOString();
-      const totalSec = getPhaseSeconds(state.phase);
-      const elapsed = totalSec - state.secondsRemaining;
-      const durationMinutes = Math.max(1, Math.round((totalSec - Math.min(state.secondsRemaining, 0)) / 60));
-
-      // Use full duration since timer reached 0
-      const fullDuration = Math.round(totalSec / 60);
+      const fullDuration = Math.round(getPhaseSeconds(state.phase) / 60);
       await dbEndSession(state.activeSessionId, now, fullDuration);
 
       const taskTitle = state.activeTaskId
@@ -676,10 +671,6 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
           },
         ],
       }));
-
-      // Silence TS unused warning
-      void elapsed;
-      void durationMinutes;
     }
 
     // Sync actual minutes after focus phase ends
@@ -794,7 +785,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       const now = new Date().toISOString();
       const totalSec = getPhaseSeconds(state.phase);
       const elapsed = totalSec - state.secondsRemaining;
-      await dbEndSession(state.activeSessionId, now, Math.max(1, Math.round(elapsed / 60)));
+      await dbEndSession(state.activeSessionId, now, Math.round(elapsed / 60));
       if (state.phase === "focus") {
         await syncTaskActualMinutes(state.activeTaskId);
       }
@@ -813,6 +804,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       "timer_task_queue",
       "timer_last_tick_at",
       "timer_active_session_id",
+      "timer_task_elapsed_focus_seconds",
     ];
     await Promise.all(clearKeys.map((k) => setSetting(k, "").catch(() => {})));
 
