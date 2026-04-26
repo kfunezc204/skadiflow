@@ -25,7 +25,7 @@ export async function getSetting(key: string): Promise<string | null> {
 export async function setSetting(key: string, value: string): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2",
+    "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     [key, value]
   );
 }
@@ -126,12 +126,20 @@ export async function deleteList(id: string): Promise<void> {
 export async function reorderLists(
   updates: Array<{ id: string; position: number }>
 ): Promise<void> {
+  if (updates.length === 0) return;
   const db = await getDb();
-  for (const u of updates) {
-    await db.execute(
-      "UPDATE lists SET position = $1, updated_at = datetime('now') WHERE id = $2",
-      [u.position, u.id]
-    );
+  await db.execute("BEGIN");
+  try {
+    for (const u of updates) {
+      await db.execute(
+        "UPDATE lists SET position = $1, updated_at = datetime('now') WHERE id = $2",
+        [u.position, u.id]
+      );
+    }
+    await db.execute("COMMIT");
+  } catch (e) {
+    await db.execute("ROLLBACK").catch(() => {});
+    throw e;
   }
 }
 
@@ -181,12 +189,13 @@ export async function createTask(
   title: string,
   status: string,
   position: number,
-  estimatedMinutes?: number | null
+  estimatedMinutes?: number | null,
+  description?: string | null
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "INSERT INTO tasks (id, list_id, title, status, position, estimated_minutes) VALUES ($1, $2, $3, $4, $5, $6)",
-    [id, listId, title, status, position, estimatedMinutes ?? null]
+    "INSERT INTO tasks (id, list_id, title, description, status, position, estimated_minutes) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    [id, listId, title, description ?? null, status, position, estimatedMinutes ?? null]
   );
 }
 
@@ -259,23 +268,91 @@ export async function getMaxPosition(status: string): Promise<number> {
   return rows[0]?.max_pos ?? -1;
 }
 
-export async function reorderTasks(
-  updates: Array<{ id: string; position: number; status?: string }>
-): Promise<void> {
+/**
+ * Promotes tasks from `backlog` or `this_week` into `today` when their `due_date` is
+ * today or earlier. Excludes subtasks (they inherit status from their parent).
+ *
+ * Runs once at app startup. Promoted tasks are placed above existing `today` tasks
+ * by assigning them negative positions (minPos - N..minPos - 1, sorted by due_date ASC
+ * so the most overdue task ends up first).
+ *
+ * Returns the number of tasks promoted.
+ */
+export async function promoteDueTasks(): Promise<number> {
   const db = await getDb();
-  for (const u of updates) {
-    if (u.status !== undefined) {
+
+  const candidates = await db.select<TaskRow[]>(
+    `SELECT * FROM tasks
+     WHERE status IN ('backlog', 'this_week')
+       AND due_date IS NOT NULL
+       AND due_date <= date('now', 'localtime')
+       AND parent_task_id IS NULL
+     ORDER BY due_date ASC, position ASC`
+  );
+
+  if (candidates.length === 0) return 0;
+
+  const minPosRows = await db.select<Array<{ min_pos: number | null }>>(
+    "SELECT MIN(position) as min_pos FROM tasks WHERE status = 'today' AND parent_task_id IS NULL"
+  );
+  const minPos = minPosRows[0]?.min_pos ?? 0;
+
+  await db.execute("BEGIN");
+  try {
+    for (let i = 0; i < candidates.length; i++) {
+      const newPos = minPos - candidates.length + i;
       await db.execute(
-        "UPDATE tasks SET position = $1, status = $2, updated_at = datetime('now') WHERE id = $3",
-        [u.position, u.status, u.id]
-      );
-    } else {
-      await db.execute(
-        "UPDATE tasks SET position = $1, updated_at = datetime('now') WHERE id = $2",
-        [u.position, u.id]
+        "UPDATE tasks SET status = 'today', position = $1, updated_at = datetime('now') WHERE id = $2",
+        [newPos, candidates[i].id]
       );
     }
+    await db.execute("COMMIT");
+  } catch (e) {
+    await db.execute("ROLLBACK").catch(() => {});
+    throw e;
   }
+
+  return candidates.length;
+}
+
+// Tail-promise queue: ensures BEGIN/COMMIT cycles never overlap on the shared
+// connection. Without this, a fast user can fire reorderTasks faster than
+// SQLite can commit (fsync ~50-200ms on Windows), nesting transactions and
+// erroring — which would cause loadTasks() to overwrite the optimistic UI.
+let _reorderTail: Promise<void> = Promise.resolve();
+
+export function reorderTasks(
+  updates: Array<{ id: string; position: number; status?: string }>
+): Promise<void> {
+  if (updates.length === 0) return Promise.resolve();
+  const run = async () => {
+    const db = await getDb();
+    await db.execute("BEGIN");
+    try {
+      for (const u of updates) {
+        if (u.status !== undefined) {
+          await db.execute(
+            "UPDATE tasks SET position = $1, status = $2, updated_at = datetime('now') WHERE id = $3",
+            [u.position, u.status, u.id]
+          );
+        } else {
+          await db.execute(
+            "UPDATE tasks SET position = $1, updated_at = datetime('now') WHERE id = $2",
+            [u.position, u.id]
+          );
+        }
+      }
+      await db.execute("COMMIT");
+    } catch (e) {
+      await db.execute("ROLLBACK").catch(() => {});
+      throw e;
+    }
+  };
+  const next = _reorderTail.then(run, run);
+  // Swallow rejection on the tail so a single failure doesn't poison subsequent
+  // calls — the original promise still rejects for the caller.
+  _reorderTail = next.catch(() => {});
+  return next;
 }
 
 // ─── Subtask helpers ──────────────────────────────────────────────────────────
@@ -347,12 +424,20 @@ export async function deleteSubtask(id: string): Promise<void> {
 export async function reorderSubtasks(
   updates: Array<{ id: string; position: number }>
 ): Promise<void> {
+  if (updates.length === 0) return;
   const db = await getDb();
-  for (const u of updates) {
-    await db.execute(
-      "UPDATE tasks SET position = $1, updated_at = datetime('now') WHERE id = $2",
-      [u.position, u.id]
-    );
+  await db.execute("BEGIN");
+  try {
+    for (const u of updates) {
+      await db.execute(
+        "UPDATE tasks SET position = $1, updated_at = datetime('now') WHERE id = $2",
+        [u.position, u.id]
+      );
+    }
+    await db.execute("COMMIT");
+  } catch (e) {
+    await db.execute("ROLLBACK").catch(() => {});
+    throw e;
   }
 }
 
@@ -618,14 +703,21 @@ export async function setBlockerDomains(
   domains: string[]
 ): Promise<void> {
   const db = await getDb();
-  await db.execute("DELETE FROM blocker_domains WHERE profile_id = $1", [profileId]);
-  for (const domain of domains) {
-    const trimmed = domain.trim();
-    if (!trimmed) continue;
-    const id = crypto.randomUUID();
-    await db.execute(
-      "INSERT INTO blocker_domains (id, profile_id, domain) VALUES ($1, $2, $3)",
-      [id, profileId, trimmed]
-    );
+  await db.execute("BEGIN");
+  try {
+    await db.execute("DELETE FROM blocker_domains WHERE profile_id = $1", [profileId]);
+    for (const domain of domains) {
+      const trimmed = domain.trim();
+      if (!trimmed) continue;
+      const id = crypto.randomUUID();
+      await db.execute(
+        "INSERT INTO blocker_domains (id, profile_id, domain) VALUES ($1, $2, $3)",
+        [id, profileId, trimmed]
+      );
+    }
+    await db.execute("COMMIT");
+  } catch (e) {
+    await db.execute("ROLLBACK").catch(() => {});
+    throw e;
   }
 }

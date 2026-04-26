@@ -11,6 +11,7 @@ import FloatingTimerPage from "@/pages/FloatingTimerPage";
 import TaskToastPage from "@/pages/TaskToastPage";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTimerStore } from "@/stores/timerStore";
+import { promoteDueTasks } from "@/lib/db";
 
 export default function App() {
   const isLoaded = useSettingsStore((s) => s.isLoaded);
@@ -20,15 +21,31 @@ export default function App() {
 
   // Empty deps: run once on mount via getState() — avoids Zustand v5 reference instability
   useEffect(() => {
-    useSettingsStore.getState().loadSettings().then(() => {
-      // Only the main window runs the timer — floating window is a passive display
-      if (window.location.hash !== "#/floating-timer" && window.location.hash !== "#/task-toast") {
+    const isMainWindow =
+      window.location.hash !== "#/floating-timer" &&
+      window.location.hash !== "#/task-toast";
+
+    (async () => {
+      // Promote due tasks (backlog/this_week → today) before settings finish loading,
+      // so that when BoardPage mounts and queries tasks, the DB is already in its
+      // post-promotion state. Only the main window runs this — passive windows skip it.
+      if (isMainWindow) {
+        try {
+          await promoteDueTasks();
+        } catch (e) {
+          console.error("promoteDueTasks failed:", e);
+        }
+      }
+
+      await useSettingsStore.getState().loadSettings();
+
+      if (isMainWindow) {
         useTimerStore.getState().loadPersistedTimer();
       }
-    });
+    })();
 
     // Only the main window listens for timer actions from the floating window
-    if (window.location.hash !== "#/floating-timer" && window.location.hash !== "#/task-toast") {
+    if (isMainWindow) {
       useTimerStore.getState().initTimerActionListener().then((unlisten) => {
         actionListenerCleanup.current = unlisten;
       });
@@ -56,7 +73,7 @@ export default function App() {
 
   return (
     <TooltipProvider>
-      {!onboardingCompleted && <OnboardingModal />}
+      {!onboardingCompleted && !isFloating && !isTaskToast && <OnboardingModal />}
       <Routes>
         {/* Floating timer window — outside AppShell, no sidebar/titlebar */}
         <Route path="/floating-timer" element={<FloatingTimerPage />} />

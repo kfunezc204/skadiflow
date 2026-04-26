@@ -2,15 +2,15 @@ import {
   addDays,
   addWeeks,
   addMonths,
-  nextMonday,
   isWeekend,
+  format,
 } from "date-fns";
 
 export type RecurrenceRule = "daily" | "weekdays" | "weekly" | "monthly";
 
 /**
- * Given a recurrence rule and a reference date, returns the next due date
- * as an ISO 8601 string (date only, e.g. "2026-03-25").
+ * Returns the next due date as a YYYY-MM-DD string in the user's *local* timezone.
+ * Uses date-fns `format` (not `toISOString`) to avoid UTC drift on late-evening inputs.
  */
 export function getNextDueDate(rule: RecurrenceRule, fromDate: Date): string {
   let next: Date;
@@ -22,7 +22,6 @@ export function getNextDueDate(rule: RecurrenceRule, fromDate: Date): string {
 
     case "weekdays": {
       next = addDays(fromDate, 1);
-      // Skip past weekend
       while (isWeekend(next)) {
         next = addDays(next, 1);
       }
@@ -41,8 +40,5 @@ export function getNextDueDate(rule: RecurrenceRule, fromDate: Date): string {
       next = addDays(fromDate, 1);
   }
 
-  return next.toISOString().split("T")[0];
+  return format(next, "yyyy-MM-dd");
 }
-
-// Kept for possible future use
-export { nextMonday };

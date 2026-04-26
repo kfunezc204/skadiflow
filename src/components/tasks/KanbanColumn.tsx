@@ -90,7 +90,6 @@ export default function KanbanColumn({ status, title, tasks, accentColor }: Prop
                 {tasks.map((task) => (
                   <motion.div
                     key={task.id}
-                    layout
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}

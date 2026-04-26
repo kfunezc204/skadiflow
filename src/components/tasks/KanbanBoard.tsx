@@ -3,6 +3,7 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  closestCorners,
   useSensor,
   useSensors,
   type DragStartEvent,
@@ -74,11 +75,16 @@ export default function KanbanBoard() {
 
     if (!targetStatus || targetStatus === sourceTask.status) return;
 
-    // Optimistic cross-column move
-    const { reorderTasks: storeReorder } = useTaskStore.getState();
+    // Optimistic cross-column move — in-memory only. The DB write is deferred to
+    // handleDragEnd to avoid firing transactional writes during rapid dragOver events,
+    // which can produce overlapping BEGIN/COMMIT calls and stall the drag.
     const targetCol = columnTasksMap[targetStatus];
     const newPos = targetCol.length;
-    storeReorder([{ id: activeId, position: newPos, status: targetStatus }]);
+    useTaskStore.setState((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === activeId ? { ...t, status: targetStatus, position: newPos } : t
+      ),
+    }));
   }
 
   async function handleDragEnd(event: DragEndEvent) {
@@ -95,25 +101,26 @@ export default function KanbanBoard() {
     if (!activeTask) return;
 
     const status = activeTask.status;
+    // Match the visible list: top-level tasks only. Subtasks share their parent's
+    // status but are hidden by useTasksByColumn — including them here would shift
+    // oldIndex/newIndex away from what the user sees.
     const colTasks = freshTasks
-      .filter((t) => t.status === status)
+      .filter((t) => t.status === status && t.parentTaskId === null)
       .sort((a, b) => a.position - b.position);
 
-    if (activeId === overId) {
-      // No movement — just persist current order
-      const updates = colTasks.map((t, i) => ({ id: t.id, position: i, status }));
-      await reorderTasks(updates);
-      return;
-    }
-
-    // Reorder within column
     const oldIndex = colTasks.findIndex((t) => t.id === activeId);
-    const newIndex = colTasks.findIndex((t) => t.id === overId);
-
     if (oldIndex === -1) return;
 
+    // overId can be either a task id or a column droppable id ("backlog"/"this_week"/"today").
+    // When it's the column itself (e.g. dropped on empty space below cards), treat it as
+    // "drop at end of column".
+    const isColumnDrop = ["backlog", "this_week", "today"].includes(overId);
+    const newIndex = isColumnDrop
+      ? colTasks.length - 1
+      : colTasks.findIndex((t) => t.id === overId);
+
     const reordered = [...colTasks];
-    if (newIndex !== -1) {
+    if (newIndex !== -1 && newIndex !== oldIndex) {
       reordered.splice(oldIndex, 1);
       reordered.splice(newIndex, 0, activeTask);
     }
@@ -125,6 +132,7 @@ export default function KanbanBoard() {
   return (
     <DndContext
       sensors={sensors}
+      collisionDetection={closestCorners}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}

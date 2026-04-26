@@ -58,7 +58,8 @@ type TaskActions = {
     title: string,
     status: TaskStatus,
     listId: string,
-    estimatedMinutes?: number | null
+    estimatedMinutes?: number | null,
+    description?: string | null
   ) => Promise<void>;
   updateTask: (id: string, fields: Parameters<typeof dbUpdateTask>[1]) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
@@ -107,16 +108,16 @@ export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
     set({ doneTasks });
   },
 
-  addTask: async (title, status, listId, estimatedMinutes) => {
+  addTask: async (title, status, listId, estimatedMinutes, description) => {
     const id = crypto.randomUUID();
     const maxPos = await getMaxPosition(status);
     const position = maxPos + 1;
-    await dbCreateTask(id, listId, title, status, position, estimatedMinutes);
+    await dbCreateTask(id, listId, title, status, position, estimatedMinutes, description);
     const newTask: Task = {
       id,
       listId,
       title,
-      description: null,
+      description: description ?? null,
       status,
       estimatedMinutes: estimatedMinutes ?? null,
       actualMinutes: 0,
@@ -217,14 +218,17 @@ export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
     // Handle recurring tasks
     if (task.recurrenceRule) {
       const { getNextDueDate } = await import("@/lib/recurrence");
-      const fromDate = task.dueDate ? new Date(task.dueDate) : new Date();
+      // Always compute the next due date from "now" (completion time), not from
+      // the task's stored dueDate. This prevents a chain of overdue instances
+      // when a recurring task is completed late: e.g. a daily task whose dueDate
+      // was 5 days ago should re-appear tomorrow, not be backfilled day-by-day.
       const nextDue = getNextDueDate(
         task.recurrenceRule as import("@/lib/recurrence").RecurrenceRule,
-        fromDate
+        new Date()
       );
       const newId = crypto.randomUUID();
       const maxPos = await getMaxPosition("backlog");
-      await dbCreateTask(newId, task.listId, task.title, "backlog", maxPos + 1, task.estimatedMinutes);
+      await dbCreateTask(newId, task.listId, task.title, "backlog", maxPos + 1, task.estimatedMinutes, task.description);
       await dbUpdateTask(newId, { dueDate: nextDue, recurrenceRule: task.recurrenceRule });
       const newTask: Task = {
         id: newId,
@@ -264,21 +268,27 @@ export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
   },
 
   reorderTasks: async (updates) => {
-    await dbReorderTasks(updates);
-    set((state) => {
-      const updatesMap = new Map(updates.map((u) => [u.id, u]));
-      return {
-        tasks: state.tasks.map((t) => {
-          const u = updatesMap.get(t.id);
-          if (!u) return t;
-          return {
-            ...t,
-            position: u.position,
-            status: (u.status as TaskStatus) ?? t.status,
-          };
-        }),
-      };
-    });
+    // Optimistic in-memory update first — without this, the UI waits for the DB
+    // round-trip and useSortable resets its transform before React re-renders,
+    // producing a visible snap-back to the previous order on the first drag.
+    const updatesMap = new Map(updates.map((u) => [u.id, u]));
+    set((state) => ({
+      tasks: state.tasks.map((t) => {
+        const u = updatesMap.get(t.id);
+        if (!u) return t;
+        return {
+          ...t,
+          position: u.position,
+          status: (u.status as TaskStatus) ?? t.status,
+        };
+      }),
+    }));
+    try {
+      await dbReorderTasks(updates);
+    } catch (e) {
+      console.error("dbReorderTasks failed, reloading tasks:", e);
+      await get().loadTasks();
+    }
   },
 
   selectTask: (id) => {
