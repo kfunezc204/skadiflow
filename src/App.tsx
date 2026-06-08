@@ -11,7 +11,7 @@ import FloatingTimerPage from "@/pages/FloatingTimerPage";
 import TaskToastPage from "@/pages/TaskToastPage";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTimerStore } from "@/stores/timerStore";
-import { promoteDueTasks } from "@/lib/db";
+import { promoteDueTasks, rollForwardOverdueRecurringTasks } from "@/lib/db";
 
 export default function App() {
   const isLoaded = useSettingsStore((s) => s.isLoaded);
@@ -31,9 +31,13 @@ export default function App() {
       // post-promotion state. Only the main window runs this — passive windows skip it.
       if (isMainWindow) {
         try {
+          // Roll overdue recurring tasks forward to their next occurrence BEFORE
+          // promoting, so they surface in Today with a current date instead of a
+          // stale, long-overdue one.
+          await rollForwardOverdueRecurringTasks();
           await promoteDueTasks();
         } catch (e) {
-          console.error("promoteDueTasks failed:", e);
+          console.error("startup task maintenance failed:", e);
         }
       }
 

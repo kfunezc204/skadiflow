@@ -11,6 +11,56 @@ export function getDb(): Promise<Database> {
   return _dbPromise;
 }
 
+/**
+ * Runs a batch of per-row column updates as a SINGLE `UPDATE … SET col = CASE id … END`
+ * statement.
+ *
+ * Why a single statement instead of `BEGIN; UPDATE; UPDATE; … COMMIT;`:
+ * tauri-plugin-sql runs every `db.execute()` against a *pooled* connection (sqlx,
+ * default up to 10). A multi-statement transaction split across separate execute()
+ * calls is unreliable — the BEGIN, the UPDATEs and the COMMIT can each land on a
+ * different connection. Under the concurrency burst at startup this leaves a pooled
+ * connection with a half-open transaction, which then makes unrelated later writes
+ * silently fail or never commit (drag snapping back, checkbox needing several clicks).
+ * One statement = one connection = atomic, and it's a single fsync so it's also fast.
+ *
+ * `table` must have an `updated_at` column. Column names are caller-controlled
+ * constants (never user input), so interpolating them is safe.
+ */
+async function runBatchUpdate(
+  table: "tasks" | "lists",
+  rows: Array<{ id: string; set: Record<string, unknown> }>
+): Promise<void> {
+  if (rows.length === 0) return;
+  const db = await getDb();
+
+  const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r.set))));
+  const params: unknown[] = [];
+  const setClauses: string[] = [];
+
+  for (const col of cols) {
+    const whens: string[] = [];
+    for (const r of rows) {
+      if (col in r.set) {
+        whens.push(`WHEN id = $${params.length + 1} THEN $${params.length + 2}`);
+        params.push(r.id, r.set[col]);
+      }
+    }
+    setClauses.push(`${col} = CASE ${whens.join(" ")} ELSE ${col} END`);
+  }
+
+  const idStart = params.length;
+  const wherePlaceholders = rows.map((r, i) => {
+    params.push(r.id);
+    return `$${idStart + i + 1}`;
+  });
+
+  await db.execute(
+    `UPDATE ${table} SET ${setClauses.join(", ")}, updated_at = datetime('now') WHERE id IN (${wherePlaceholders.join(", ")})`,
+    params
+  );
+}
+
 // ─── Settings ────────────────────────────────────────────────────────────────
 
 export async function getSetting(key: string): Promise<string | null> {
@@ -126,21 +176,10 @@ export async function deleteList(id: string): Promise<void> {
 export async function reorderLists(
   updates: Array<{ id: string; position: number }>
 ): Promise<void> {
-  if (updates.length === 0) return;
-  const db = await getDb();
-  await db.execute("BEGIN");
-  try {
-    for (const u of updates) {
-      await db.execute(
-        "UPDATE lists SET position = $1, updated_at = datetime('now') WHERE id = $2",
-        [u.position, u.id]
-      );
-    }
-    await db.execute("COMMIT");
-  } catch (e) {
-    await db.execute("ROLLBACK").catch(() => {});
-    throw e;
-  }
+  await runBatchUpdate(
+    "lists",
+    updates.map((u) => ({ id: u.id, set: { position: u.position } }))
+  );
 }
 
 // ─── Task helpers ─────────────────────────────────────────────────────────────
@@ -297,62 +336,76 @@ export async function promoteDueTasks(): Promise<number> {
   );
   const minPos = minPosRows[0]?.min_pos ?? 0;
 
-  await db.execute("BEGIN");
-  try {
-    for (let i = 0; i < candidates.length; i++) {
-      const newPos = minPos - candidates.length + i;
-      await db.execute(
-        "UPDATE tasks SET status = 'today', position = $1, updated_at = datetime('now') WHERE id = $2",
-        [newPos, candidates[i].id]
-      );
-    }
-    await db.execute("COMMIT");
-  } catch (e) {
-    await db.execute("ROLLBACK").catch(() => {});
-    throw e;
-  }
+  await runBatchUpdate(
+    "tasks",
+    candidates.map((c, i) => ({
+      id: c.id,
+      set: { status: "today", position: minPos - candidates.length + i },
+    }))
+  );
 
   return candidates.length;
 }
 
-// Tail-promise queue: ensures BEGIN/COMMIT cycles never overlap on the shared
-// connection. Without this, a fast user can fire reorderTasks faster than
-// SQLite can commit (fsync ~50-200ms on Windows), nesting transactions and
-// erroring — which would cause loadTasks() to overwrite the optimistic UI.
-let _reorderTail: Promise<void> = Promise.resolve();
+/**
+ * Advances overdue recurring tasks (recurrence_rule set, not done, due_date in the
+ * past) to their next occurrence on or after today. Without this, a recurring task
+ * the user stops completing freezes with a stale due_date (e.g. a daily task stuck
+ * showing a month-old date) instead of recurring.
+ *
+ * Each task's new due_date is computed in O(1) via `getNextOccurrenceOnOrAfter` — no
+ * day-by-day catch-up — so this is fast regardless of how long the app was closed.
+ * Runs once at startup, before `promoteDueTasks`. Returns the number of tasks rolled.
+ */
+export async function rollForwardOverdueRecurringTasks(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<TaskRow[]>(
+    `SELECT * FROM tasks
+     WHERE recurrence_rule IS NOT NULL
+       AND parent_task_id IS NULL
+       AND status != 'done'
+       AND due_date IS NOT NULL
+       AND due_date < date('now', 'localtime')`
+  );
+  if (rows.length === 0) return 0;
+
+  const { getNextOccurrenceOnOrAfter } = await import("@/lib/recurrence");
+  const { parseISO } = await import("date-fns");
+  const today = new Date();
+
+  const updates = rows
+    .map((r) => ({
+      id: r.id,
+      oldDue: r.due_date!,
+      newDue: getNextOccurrenceOnOrAfter(
+        r.recurrence_rule as import("@/lib/recurrence").RecurrenceRule,
+        parseISO(r.due_date!),
+        today
+      ),
+    }))
+    .filter((u) => u.newDue !== u.oldDue);
+
+  if (updates.length === 0) return 0;
+
+  await runBatchUpdate(
+    "tasks",
+    updates.map((u) => ({ id: u.id, set: { due_date: u.newDue } }))
+  );
+  return updates.length;
+}
 
 export function reorderTasks(
   updates: Array<{ id: string; position: number; status?: string }>
 ): Promise<void> {
-  if (updates.length === 0) return Promise.resolve();
-  const run = async () => {
-    const db = await getDb();
-    await db.execute("BEGIN");
-    try {
-      for (const u of updates) {
-        if (u.status !== undefined) {
-          await db.execute(
-            "UPDATE tasks SET position = $1, status = $2, updated_at = datetime('now') WHERE id = $3",
-            [u.position, u.status, u.id]
-          );
-        } else {
-          await db.execute(
-            "UPDATE tasks SET position = $1, updated_at = datetime('now') WHERE id = $2",
-            [u.position, u.id]
-          );
-        }
-      }
-      await db.execute("COMMIT");
-    } catch (e) {
-      await db.execute("ROLLBACK").catch(() => {});
-      throw e;
-    }
-  };
-  const next = _reorderTail.then(run, run);
-  // Swallow rejection on the tail so a single failure doesn't poison subsequent
-  // calls — the original promise still rejects for the caller.
-  _reorderTail = next.catch(() => {});
-  return next;
+  // One atomic statement (see runBatchUpdate) — no BEGIN/COMMIT, so it can't be
+  // split across pooled connections and can't snap-back on a transaction error.
+  return runBatchUpdate(
+    "tasks",
+    updates.map((u) => ({
+      id: u.id,
+      set: u.status !== undefined ? { position: u.position, status: u.status } : { position: u.position },
+    }))
+  );
 }
 
 // ─── Subtask helpers ──────────────────────────────────────────────────────────
@@ -424,21 +477,10 @@ export async function deleteSubtask(id: string): Promise<void> {
 export async function reorderSubtasks(
   updates: Array<{ id: string; position: number }>
 ): Promise<void> {
-  if (updates.length === 0) return;
-  const db = await getDb();
-  await db.execute("BEGIN");
-  try {
-    for (const u of updates) {
-      await db.execute(
-        "UPDATE tasks SET position = $1, updated_at = datetime('now') WHERE id = $2",
-        [u.position, u.id]
-      );
-    }
-    await db.execute("COMMIT");
-  } catch (e) {
-    await db.execute("ROLLBACK").catch(() => {});
-    throw e;
-  }
+  await runBatchUpdate(
+    "tasks",
+    updates.map((u) => ({ id: u.id, set: { position: u.position } }))
+  );
 }
 
 export async function getMaxSubtaskPosition(parentId: string): Promise<number> {
@@ -543,8 +585,16 @@ export async function getTaskTotalFocusMinutes(taskId: string): Promise<number> 
 
 export async function getCompletedTasksByDateRange(from: string, to: string): Promise<Task[]> {
   const db = await getDb();
+  // `completed_at` is written by SQLite `datetime('now')` → "YYYY-MM-DD HH:MM:SS"
+  // (space separator, no 'Z'), but `from`/`to` arrive as JS toISOString()
+  // → "YYYY-MM-DDTHH:MM:SS.sssZ". A raw string compare is wrong because ' ' < 'T'
+  // lexically, so we normalize completed_at to the same ISO shape before comparing.
   const rows = await db.select<TaskRow[]>(
-    "SELECT * FROM tasks WHERE status = 'done' AND parent_task_id IS NULL AND completed_at >= $1 AND completed_at <= $2 ORDER BY completed_at DESC",
+    `SELECT * FROM tasks
+     WHERE status = 'done' AND parent_task_id IS NULL
+       AND strftime('%Y-%m-%dT%H:%M:%fZ', completed_at) >= $1
+       AND strftime('%Y-%m-%dT%H:%M:%fZ', completed_at) <= $2
+     ORDER BY completed_at DESC`,
     [from, to]
   );
   return rows.map(rowToTask);
@@ -582,7 +632,9 @@ export async function getTasksCompletedPerDay(from: string, to: string): Promise
   const rows = await db.select<Array<{ date: string; count: number }>>(
     `SELECT date(completed_at) as date, COUNT(*) as count
      FROM tasks
-     WHERE status = 'done' AND parent_task_id IS NULL AND completed_at >= $1 AND completed_at <= $2
+     WHERE status = 'done' AND parent_task_id IS NULL
+       AND strftime('%Y-%m-%dT%H:%M:%fZ', completed_at) >= $1
+       AND strftime('%Y-%m-%dT%H:%M:%fZ', completed_at) <= $2
      GROUP BY date(completed_at)`,
     [from, to]
   );
@@ -703,21 +755,22 @@ export async function setBlockerDomains(
   domains: string[]
 ): Promise<void> {
   const db = await getDb();
-  await db.execute("BEGIN");
-  try {
-    await db.execute("DELETE FROM blocker_domains WHERE profile_id = $1", [profileId]);
-    for (const domain of domains) {
-      const trimmed = domain.trim();
-      if (!trimmed) continue;
-      const id = crypto.randomUUID();
-      await db.execute(
-        "INSERT INTO blocker_domains (id, profile_id, domain) VALUES ($1, $2, $3)",
-        [id, profileId, trimmed]
-      );
-    }
-    await db.execute("COMMIT");
-  } catch (e) {
-    await db.execute("ROLLBACK").catch(() => {});
-    throw e;
-  }
+  // No BEGIN/COMMIT: a multi-statement transaction is unreliable on the connection
+  // pool (see runBatchUpdate). DELETE then a single multi-row INSERT keeps this to two
+  // plain autocommit statements.
+  await db.execute("DELETE FROM blocker_domains WHERE profile_id = $1", [profileId]);
+
+  const cleaned = domains.map((d) => d.trim()).filter(Boolean);
+  if (cleaned.length === 0) return;
+
+  const params: unknown[] = [];
+  const valueGroups = cleaned.map((domain) => {
+    params.push(crypto.randomUUID(), profileId, domain);
+    const n = params.length;
+    return `($${n - 2}, $${n - 1}, $${n})`;
+  });
+  await db.execute(
+    `INSERT INTO blocker_domains (id, profile_id, domain) VALUES ${valueGroups.join(", ")}`,
+    params
+  );
 }

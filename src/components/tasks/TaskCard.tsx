@@ -178,6 +178,10 @@ export default function TaskCard({ task, columnStatus, columnTasks }: Props) {
         {/* Checkbox */}
         <div
           onClick={(e) => e.stopPropagation()}
+          // Stop pointerdown too: the card root carries the dnd-kit drag listeners,
+          // and without this a click on the checkbox can be captured as the start of
+          // a drag, so completion silently fails and needs several clicks.
+          onPointerDown={(e) => e.stopPropagation()}
           className="mt-0.5 flex-shrink-0"
         >
           <Checkbox
@@ -293,7 +297,10 @@ export default function TaskCard({ task, columnStatus, columnTasks }: Props) {
         </div>
 
         {/* Arrow actions — hover only */}
-        <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+        >
           <button
             onClick={moveUp}
             className="p-0.5 rounded text-white/30 hover:text-white/70 hover:bg-white/10"
