@@ -2,8 +2,13 @@ use std::collections::HashSet;
 use std::fs;
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+
+/// Serializes activate / deactivate / exit-cleanup so a shutdown can never
+/// interleave with an in-flight (de)activation running on another thread.
+static LOCKER_LOCK: Mutex<()> = Mutex::new(());
 
 /// Flag to hide console windows spawned by Command on Windows.
 #[cfg(target_os = "windows")]
@@ -282,6 +287,43 @@ pub fn doh_state_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<Pa
     Ok(dir.join("doh_state.json"))
 }
 
+// ── Persisted locker-active flag ─────────────────────────────────────
+//
+// Firewall rules survive the process (and reboots). This flag records that an
+// activation may have left artifacts behind, so exit and startup paths know
+// whether a cleanup pass is needed without probing netsh every time.
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct LockerState {
+    is_active: bool,
+}
+
+pub fn locker_state_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app data dir: {}", e))?;
+    Ok(dir.join("locker_state.json"))
+}
+
+fn locker_is_active(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<LockerState>(&t).ok())
+        .map(|s| s.is_active)
+        .unwrap_or(false)
+}
+
+fn set_locker_active(path: &Path, is_active: bool) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(text) = serde_json::to_string(&LockerState { is_active }) {
+        let _ = fs::write(path, text);
+    }
+}
+
 #[cfg(target_os = "windows")]
 const CHROME_POLICY_KEY: &str = r"SOFTWARE\Policies\Google\Chrome";
 #[cfg(target_os = "windows")]
@@ -462,12 +504,20 @@ pub async fn activate_locker(
     // DNS resolution, netsh and PowerShell are all blocking — run the whole
     // activation off the async runtime so the UI never freezes.
     let doh_path = doh_state_path(&app)?;
-    tauri::async_runtime::spawn_blocking(move || activate_locker_impl(domains, &doh_path))
-        .await
-        .map_err(|e| e.to_string())?
+    let state_path = locker_state_path(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        activate_locker_impl(domains, &doh_path, &state_path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-fn activate_locker_impl(domains: Vec<String>, doh_state: &Path) -> Result<LockerResult, String> {
+fn activate_locker_impl(
+    domains: Vec<String>,
+    doh_state: &Path,
+    locker_state: &Path,
+) -> Result<LockerResult, String> {
+    let _guard = LOCKER_LOCK.lock().unwrap();
     let mut result = LockerResult::default();
 
     // ── Layer 0: Resolve real IPs BEFORE modifying hosts file ─────
@@ -475,6 +525,10 @@ fn activate_locker_impl(domains: Vec<String>, doh_state: &Path) -> Result<Locker
     // We block these IPs via firewall so cached DNS entries can't bypass the block.
     let resolved_ips = resolve_domain_ips(&domains);
     result.ips_resolved = resolved_ips.len();
+
+    // Mark active BEFORE any mutation: if we crash or get killed mid-way, the
+    // next startup (or exit path) knows there may be artifacts to clean up.
+    set_locker_active(locker_state, true);
 
     // ── Layer 1: Write hosts file ────────────────────────────────
     // Uses 0.0.0.0 (instant connection refused) instead of 127.0.0.1 (slow timeout).
@@ -519,16 +573,30 @@ fn activate_locker_impl(domains: Vec<String>, doh_state: &Path) -> Result<Locker
 #[tauri::command]
 pub async fn deactivate_locker(app: tauri::AppHandle) -> Result<(), String> {
     let doh_path = doh_state_path(&app)?;
-    tauri::async_runtime::spawn_blocking(move || deactivate_locker_impl(&doh_path))
+    let state_path = locker_state_path(&app)?;
+    tauri::async_runtime::spawn_blocking(move || deactivate_locker_impl(&doh_path, &state_path))
         .await
         .map_err(|e| e.to_string())?
 }
 
-fn deactivate_locker_impl(doh_state: &Path) -> Result<(), String> {
-    let path = hosts_file_path();
-    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let clean = remove_locker_block(&content);
-    fs::write(&path, clean).map_err(|e| e.to_string())?;
+/// Best-effort removal of every artifact an activation may have left behind.
+/// Each layer is attempted independently — a hosts file we can't write (no
+/// admin) must never stop the firewall rules or DoH policies from being
+/// cleaned, since lingering firewall rules slow down ALL network traffic.
+fn deactivate_locker_impl(doh_state: &Path, locker_state: &Path) -> Result<(), String> {
+    let _guard = LOCKER_LOCK.lock().unwrap();
+
+    // Hosts file: only rewrite when our sentinel block is actually present, so
+    // unelevated runs don't fail on a hosts file that is already clean.
+    let hosts_result: Result<(), String> = (|| {
+        let path = hosts_file_path();
+        let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        if !content.contains(SENTINEL_START) {
+            return Ok(());
+        }
+        let clean = remove_locker_block(&content);
+        fs::write(&path, clean).map_err(|e| e.to_string())
+    })();
 
     #[cfg(target_os = "windows")]
     {
@@ -540,5 +608,26 @@ fn deactivate_locker_impl(doh_state: &Path) -> Result<(), String> {
         let _ = doh_state;
     }
 
-    Ok(())
+    // Only clear the flag when the hosts layer is clean too — a partial
+    // cleanup keeps the flag set so the next startup retries.
+    if hosts_result.is_ok() {
+        set_locker_active(locker_state, false);
+    }
+
+    hosts_result
+}
+
+/// Guarded synchronous cleanup for exit and startup paths. A cheap no-op
+/// unless a previous activation is still live (flag persisted on disk), so
+/// closing the app outside a focus session stays instant. Removing the
+/// firewall rules here is what keeps DNS/QUIC traffic from staying blocked
+/// system-wide after the app is gone.
+pub fn cleanup_locker_artifacts<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let (Ok(doh_path), Ok(state_path)) = (doh_state_path(app), locker_state_path(app)) else {
+        return;
+    };
+    if !locker_is_active(&state_path) {
+        return;
+    }
+    let _ = deactivate_locker_impl(&doh_path, &state_path);
 }

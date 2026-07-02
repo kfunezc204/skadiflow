@@ -74,6 +74,7 @@ pub fn run() {
                         // Quit still works without the main window
                         if event.id().as_ref() == "quit" {
                             commands::proxy_blocker::deactivate_on_exit(app);
+                            commands::locker::cleanup_locker_artifacts(app);
                             app.exit(0);
                         }
                         return;
@@ -94,6 +95,7 @@ pub fn run() {
                         }
                         "quit" => {
                             commands::proxy_blocker::deactivate_on_exit(app);
+                            commands::locker::cleanup_locker_artifacts(app);
                             app.exit(0);
                         }
                         _ => {}
@@ -134,6 +136,17 @@ pub fn run() {
                 commands::proxy_blocker::cleanup_stale_proxy(&state_path);
             }
 
+            // Clean up locker artifacts (firewall rules, hosts block, DoH
+            // policies) left behind if a previous run was killed mid-cleanup.
+            // Guarded by a persisted flag; runs off the main thread because
+            // netsh calls are slow.
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    commands::locker::cleanup_locker_artifacts(&handle);
+                });
+            }
+
             // Start the local blocking proxy server (runs on tokio runtime)
             tauri::async_runtime::spawn(async {
                 match commands::proxy_blocker::start_server().await {
@@ -150,6 +163,10 @@ pub fn run() {
                     // Guarded restore: a no-op unless OUR proxy is active, so a
                     // user's own proxy config always survives app shutdown.
                     commands::proxy_blocker::deactivate_on_exit(window.app_handle());
+                    // Waits for any in-flight deactivation (shared lock) and
+                    // removes leftover firewall/hosts/DoH artifacts, so closing
+                    // the app mid-session can't leave the network throttled.
+                    commands::locker::cleanup_locker_artifacts(window.app_handle());
                     window.app_handle().exit(0);
                 }
             }

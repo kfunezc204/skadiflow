@@ -12,6 +12,7 @@ type SettingsState = {
   weekStart: number; // 0 = Sunday, 1 = Monday
   notificationsEnabled: boolean;
   lockerDuringBreaks: boolean;
+  lockerHardcore: boolean;
   autoStartNextPomodoro: boolean;
   onboardingCompleted: boolean;
   focusBackground: string;
@@ -26,6 +27,7 @@ type SettingsActions = {
   loadSettings: () => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   setLockerDuringBreaks: (val: boolean) => Promise<void>;
+  setLockerHardcore: (val: boolean) => Promise<void>;
   setPomodoroFocusMinutes: (val: number) => Promise<void>;
   setPomodoroShortBreakMinutes: (val: number) => Promise<void>;
   setPomodoroLongBreakMinutes: (val: number) => Promise<void>;
@@ -51,6 +53,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
     weekStart: 1,
     notificationsEnabled: true,
     lockerDuringBreaks: false,
+    lockerHardcore: false,
     autoStartNextPomodoro: true,
     onboardingCompleted: false,
     focusBackground: "dark",
@@ -71,6 +74,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
         weekStart,
         notifs,
         lockerBreaks,
+        lockerHardcore,
         autoStart,
         onboarding,
         focusBg,
@@ -87,6 +91,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
         getSetting("week_start"),
         getSetting("notifications_enabled"),
         getSetting("locker_during_breaks"),
+        getSetting("locker_hardcore"),
         getSetting("auto_start_next_pomodoro"),
         getSetting("onboarding_completed"),
         getSetting("focus_background"),
@@ -114,6 +119,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
         weekStart: weekStart ? parseInt(weekStart) : 1,
         notificationsEnabled: notifs !== "false",
         lockerDuringBreaks: lockerBreaks === "true",
+        lockerHardcore: lockerHardcore === "true",
         autoStartNextPomodoro: autoStart !== "false",
         onboardingCompleted: onboarding === "true",
         focusBackground: focusBg || "dark",
@@ -141,6 +147,11 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
     setLockerDuringBreaks: async (val: boolean) => {
       await setSetting("locker_during_breaks", String(val));
       set({ lockerDuringBreaks: val });
+    },
+
+    setLockerHardcore: async (val: boolean) => {
+      await setSetting("locker_hardcore", String(val));
+      set({ lockerHardcore: val });
     },
 
     setPomodoroFocusMinutes: async (val: number) => {

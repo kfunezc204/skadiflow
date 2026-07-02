@@ -136,10 +136,14 @@ async function activateLocker() {
     const msg = await invoke<string>("activate_proxy_blocker", { domains });
     console.log("[Locker]", msg);
 
-    // Secondary: try hosts file + firewall (needs admin, may fail silently)
-    invoke("activate_locker", { domains }).catch((e) =>
-      console.log("[Locker] hosts/firewall layer skipped (no admin):", e)
-    );
+    // Secondary (opt-in "hardcore" mode): hosts file + firewall rules. Needs
+    // admin, and its IP/DoH firewall rules can slow unrelated sites — so it
+    // only runs when the user explicitly enabled it in Settings.
+    if (useSettingsStore.getState().lockerHardcore) {
+      invoke("activate_locker", { domains }).catch((e) =>
+        console.log("[Locker] hosts/firewall layer skipped (no admin):", e)
+      );
+    }
   } catch (e) {
     console.warn("Locker activation failed:", e);
     toast.error("Website blocker failed to start");

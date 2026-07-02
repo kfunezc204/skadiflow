@@ -76,6 +76,7 @@ export default function SettingsPage() {
     notificationsEnabled,
     weekStart,
     lockerDuringBreaks,
+    lockerHardcore,
     focusBackground,
     focusSound,
     focusSoundVolume,
@@ -90,6 +91,7 @@ export default function SettingsPage() {
     setNotificationsEnabled,
     setWeekStart,
     setLockerDuringBreaks,
+    setLockerHardcore,
     setFocusBackground,
     setFocusSound,
     setFocusSoundVolume,
@@ -332,6 +334,18 @@ export default function SettingsPage() {
                 checked={lockerDuringBreaks}
                 onCheckedChange={async (checked) => {
                   await setLockerDuringBreaks(checked);
+                  toast.success("Settings updated");
+                }}
+              />
+            </SettingRow>
+            <SettingRow
+              label="Hardcore Blocking"
+              description="Extra firewall + hosts-file layers (needs admin). Harder to bypass, but may slow other sites during sessions"
+            >
+              <Switch
+                checked={lockerHardcore}
+                onCheckedChange={async (checked) => {
+                  await setLockerHardcore(checked);
                   toast.success("Settings updated");
                 }}
               />
