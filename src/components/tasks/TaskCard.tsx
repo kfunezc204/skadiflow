@@ -2,7 +2,8 @@ import { useState, useRef } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { format, isPast, isToday, parseISO } from "date-fns";
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Pencil } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Pencil, StickyNote } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,9 @@ export default function TaskCard({ task, columnStatus, columnTasks }: Props) {
   const [editingActual, setEditingActual] = useState(false);
   const [actualDraft, setActualDraft] = useState("");
   const actualInputRef = useRef<HTMLInputElement>(null);
+
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const hasNotes = !!task.description?.trim();
 
   const selectedTaskId = useTaskStore((s) => s.selectedTaskId);
   const { completeTask, updateTask, moveTask, reorderTasks, selectTask } = useTaskStore.getState();
@@ -130,6 +134,11 @@ export default function TaskCard({ task, columnStatus, columnTasks }: Props) {
   // Arrow reorder helpers
   const colTasks = [...columnTasks].sort((a, b) => a.position - b.position);
   const myIndex = colTasks.findIndex((t) => t.id === task.id);
+  const statusIdx = STATUS_ORDER.indexOf(columnStatus);
+  const canUp = myIndex > 0;
+  const canDown = myIndex < colTasks.length - 1;
+  const canLeft = statusIdx > 0;
+  const canRight = statusIdx < STATUS_ORDER.length - 1;
 
   async function moveUp(e: React.MouseEvent) {
     e.stopPropagation();
@@ -293,43 +302,92 @@ export default function TaskCard({ task, columnStatus, columnTasks }: Props) {
                 {subtaskProgress.done}/{subtaskProgress.total} ✓
               </Badge>
             )}
+
+            {/* Notes toggle — bottom-right corner, only when the task has a description */}
+            {hasNotes && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setNotesExpanded((v) => !v);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                className={`ml-auto self-end flex items-center gap-1 h-6 px-1.5 rounded-md transition-colors ${
+                  notesExpanded
+                    ? "text-orange-400 bg-orange-500/10"
+                    : "text-white/40 hover:text-white/80 hover:bg-white/10"
+                }`}
+                title={notesExpanded ? "Hide notes" : "Show notes"}
+              >
+                <StickyNote size={14} />
+                <ChevronDown
+                  size={12}
+                  className={`transition-transform duration-150 ${notesExpanded ? "rotate-180" : ""}`}
+                />
+              </button>
+            )}
           </div>
+
+          {/* Expandable notes */}
+          <AnimatePresence initial={false}>
+            {hasNotes && notesExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+                className="overflow-hidden"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="mt-2 pt-2 border-t border-white/5 text-xs text-white/50 leading-relaxed whitespace-pre-wrap break-words select-text cursor-text">
+                  {task.description}
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* Arrow actions — hover only */}
-        <div
-          onPointerDown={(e) => e.stopPropagation()}
-          className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+      </div>
+
+      {/* Move actions — floating pill, hover only. Overlays the top-right corner
+          instead of reserving layout space, so the card stays compact. */}
+      <div
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 rounded-md border border-[#3A3A3A] bg-[#242424] px-1 py-0.5 shadow-md opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity"
+      >
+        <button
+          onClick={moveLeft}
+          disabled={!canLeft}
+          className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-white/10 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-white/40"
+          title="Move to previous column"
         >
-          <button
-            onClick={moveUp}
-            className="p-0.5 rounded text-white/30 hover:text-white/70 hover:bg-white/10"
-            title="Move up"
-          >
-            <ChevronUp size={11} />
-          </button>
-          <button
-            onClick={moveLeft}
-            className="p-0.5 rounded text-white/30 hover:text-white/70 hover:bg-white/10"
-            title="Move left"
-          >
-            <ChevronLeft size={11} />
-          </button>
-          <button
-            onClick={moveRight}
-            className="p-0.5 rounded text-white/30 hover:text-white/70 hover:bg-white/10"
-            title="Move right"
-          >
-            <ChevronRight size={11} />
-          </button>
-          <button
-            onClick={moveDown}
-            className="p-0.5 rounded text-white/30 hover:text-white/70 hover:bg-white/10"
-            title="Move down"
-          >
-            <ChevronDown size={11} />
-          </button>
-        </div>
+          <ChevronLeft size={11} />
+        </button>
+        <button
+          onClick={moveUp}
+          disabled={!canUp}
+          className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-white/10 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-white/40"
+          title="Move up"
+        >
+          <ChevronUp size={11} />
+        </button>
+        <button
+          onClick={moveDown}
+          disabled={!canDown}
+          className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-white/10 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-white/40"
+          title="Move down"
+        >
+          <ChevronDown size={11} />
+        </button>
+        <button
+          onClick={moveRight}
+          disabled={!canRight}
+          className="p-1 rounded text-white/40 hover:text-white/80 hover:bg-white/10 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-white/40"
+          title="Move to next column"
+        >
+          <ChevronRight size={11} />
+        </button>
       </div>
     </div>
   );

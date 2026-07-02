@@ -1,4 +1,4 @@
-import { create } from "zustand";
+﻿import { create } from "zustand";
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfDay, endOfDay, eachDayOfInterval, format, parseISO } from "date-fns";
 import {
   getCompletedTasksByDateRange,
@@ -7,8 +7,10 @@ import {
   getFocusMinutesPerDay,
   getSessionsWithTaskNames,
   getAllFocusSessionDates,
+  DELETED_LIST_ID,
   type SessionWithTask,
 } from "@/lib/db";
+import { calcStreak, estimateAccuracy } from "@/lib/reportDates";
 import { useListStore } from "@/stores/listStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 
@@ -64,29 +66,6 @@ function getDefaultRange(): DateRange {
   };
 }
 
-function calcStreak(dates: string[]): number {
-  if (dates.length === 0) return 0;
-  const sorted = [...dates].sort().reverse(); // descending
-  const today = format(new Date(), "yyyy-MM-dd");
-  const yesterday = format(new Date(Date.now() - 86400000), "yyyy-MM-dd");
-
-  // Streak must start today or yesterday to be "active"
-  if (sorted[0] !== today && sorted[0] !== yesterday) return 0;
-
-  let streak = 1;
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = parseISO(sorted[i - 1]);
-    const curr = parseISO(sorted[i]);
-    const diff = Math.round((prev.getTime() - curr.getTime()) / 86400000);
-    if (diff === 1) {
-      streak++;
-    } else {
-      break;
-    }
-  }
-  return streak;
-}
-
 export const useReportStore = create<ReportState & ReportActions>((set, get) => ({
   dateRange: {
     from: "",
@@ -134,29 +113,29 @@ export const useReportStore = create<ReportState & ReportActions>((set, get) => 
       .filter((s) => s.sessionType === "focus" && s.durationMinutes != null)
       .reduce((sum, s) => sum + (s.durationMinutes ?? 0), 0);
 
-    // EST accuracy: avg(estimated / actual) for tasks with both values
-    const accuracyTasks = completedTasks.filter(
-      (t) => t.estimatedMinutes != null && t.actualMinutes > 0
-    );
-    const avgEstAccuracy =
-      accuracyTasks.length > 0
-        ? (accuracyTasks.reduce((sum, t) => sum + (t.estimatedMinutes! / t.actualMinutes), 0) /
-            accuracyTasks.length) *
-          100
-        : null;
+    // EST accuracy: symmetric min/max ratio per task, always bounded 0-100
+    const avgEstAccuracy = estimateAccuracy(completedTasks);
 
-    // Streak
-    const currentStreak = calcStreak(allFocusDates);
+    // Streak (dates are local day keys from SQL; "today" injected here)
+    const currentStreak = calcStreak(allFocusDates, new Date());
 
     // Enrich timeByList with list metadata
     const lists = useListStore.getState().lists;
     const timeByList: TimeByList[] = focusByList
       .map((item) => {
+        if (item.listId === DELETED_LIST_ID) {
+          return {
+            listId: item.listId,
+            listName: "(Deleted list)",
+            listColor: "#6b7280",
+            minutes: item.minutes,
+          };
+        }
         const list = lists.find((l) => l.id === item.listId);
         return {
           listId: item.listId,
-          listName: list?.name ?? "Unknown",
-          listColor: list?.color ?? "#888",
+          listName: list?.name ?? "(Deleted list)",
+          listColor: list?.color ?? "#6b7280",
           minutes: item.minutes,
         };
       })

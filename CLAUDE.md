@@ -116,6 +116,7 @@ productivity-app/
 | `blocker_profiles` | 002 | Named website blocklist profiles |
 | `blocker_domains` | 002 | Domains per profile; CASCADE delete on profile removal |
 | `tasks.parent_task_id` | 003 | Nullable FK column added to `tasks`; enables subtask hierarchy |
+| *(data repair)* | 004 | One-time repair: recomputes `sessions.duration_minutes` from timestamps and `tasks.actual_minutes` from focus sessions (pause/resume double-counting bug) |
 
 Default "Inbox" list (`id: 'inbox-default'`) is seeded by migration 001. Migration 002 also seeds `locker_during_breaks = 'false'` into `settings`. Migration 003 adds `parent_task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE` to `tasks` plus an index on that column.
 

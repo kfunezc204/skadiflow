@@ -64,8 +64,10 @@ export function formatSeconds(totalSeconds: number): string {
  */
 export function extractEstFromTitle(raw: string): { title: string; est: number | null } {
   const trimmed = raw.trim();
-  // Match trailing estimate token (e.g. "45m", "1h", "1.5h", "1h30m")
-  const estPattern = /\s+(\d+(?:\.\d+)?\s*h(?:r|ours?)?\s*(?:\d+\s*m(?:in(?:utes?)?)?)|\d+(?:\.\d+)?\s*h(?:r|ours?)?|\d+(?:\.\d+)?\s*m(?:in(?:utes?)?)?|\d+)$/i;
+  // Match trailing estimate token (e.g. "45m", "1h", "1.5h", "1h30m").
+  // An explicit unit (h/m) is required — a trailing bare number ("Comprar 2")
+  // is part of the title, not an estimate.
+  const estPattern = /\s+(\d+(?:\.\d+)?\s*h(?:r|ours?)?\s*(?:\d+\s*m(?:in(?:utes?)?)?)|\d+(?:\.\d+)?\s*h(?:r|ours?)?|\d+(?:\.\d+)?\s*m(?:in(?:utes?)?)?)$/i;
   const match = trimmed.match(estPattern);
   if (match) {
     const est = parseEstimate(match[1]);

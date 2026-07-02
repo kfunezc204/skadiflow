@@ -95,11 +95,21 @@ describe("extractEstFromTitle", () => {
     });
   });
 
-  it("treats trailing bare number as minutes estimate", () => {
-    expect(extractEstFromTitle("Sync 30")).toEqual({
-      title: "Sync",
-      est: 30,
+  it("leaves trailing bare numbers in the title (unit is required for an estimate)", () => {
+    // "Comprar 2" is a title about buying two of something, not a 2-minute task
+    expect(extractEstFromTitle("Comprar 2")).toEqual({
+      title: "Comprar 2",
+      est: null,
     });
+    expect(extractEstFromTitle("Sync 30")).toEqual({
+      title: "Sync 30",
+      est: null,
+    });
+  });
+
+  it("still parses bare numbers in dedicated estimate fields", () => {
+    // The unit requirement applies only to titles — parseEstimate keeps it
+    expect(parseEstimate("30")).toBe(30);
   });
 
   it("leaves title intact when no trailing estimate is present", () => {

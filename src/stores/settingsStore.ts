@@ -61,6 +61,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
     isLoaded: false,
 
     loadSettings: async () => {
+      try {
       const [
         theme,
         focusMin,
@@ -122,6 +123,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>(
         reminderIntervalMinutes: reminderInterval ? parseInt(reminderInterval) : 0,
         isLoaded: true,
       });
+      } catch (e) {
+        // The whole UI gates on isLoaded — never leave the app stuck on the
+        // startup spinner. Fall back to the store's defaults.
+        console.error("loadSettings failed, using defaults:", e);
+        document.documentElement.classList.add("dark");
+        set({ isLoaded: true });
+      }
     },
 
     setTheme: async (theme: Theme) => {

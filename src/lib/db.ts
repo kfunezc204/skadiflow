@@ -258,7 +258,12 @@ export async function updateTask(
   let i = 1;
   if (fields.title !== undefined) { parts.push(`title = $${i++}`); values.push(fields.title); }
   if (fields.description !== undefined) { parts.push(`description = $${i++}`); values.push(fields.description); }
-  if (fields.status !== undefined) { parts.push(`status = $${i++}`); values.push(fields.status); }
+  if (fields.status !== undefined) {
+    parts.push(`status = $${i++}`); values.push(fields.status);
+    // Keep completed_at consistent no matter which code path changes the status,
+    // so a task moved to done via a generic update behaves like completeTask.
+    parts.push(fields.status === "done" ? `completed_at = datetime('now')` : `completed_at = NULL`);
+  }
   if (fields.estimatedMinutes !== undefined) { parts.push(`estimated_minutes = $${i++}`); values.push(fields.estimatedMinutes); }
   if (fields.actualMinutes !== undefined) { parts.push(`actual_minutes = $${i++}`); values.push(fields.actualMinutes); }
   if (fields.position !== undefined) { parts.push(`position = $${i++}`); values.push(fields.position); }
@@ -300,8 +305,10 @@ export async function uncompleteTask(
 
 export async function getMaxPosition(status: string): Promise<number> {
   const db = await getDb();
+  // Subtasks share their parent's status but live in their own ordering space —
+  // excluding them keeps column positions contiguous.
   const rows = await db.select<Array<{ max_pos: number | null }>>(
-    "SELECT COALESCE(MAX(position), -1) as max_pos FROM tasks WHERE status = $1",
+    "SELECT COALESCE(MAX(position), -1) as max_pos FROM tasks WHERE status = $1 AND parent_task_id IS NULL",
     [status]
   );
   return rows[0]?.max_pos ?? -1;
@@ -551,6 +558,30 @@ export async function endSession(
   );
 }
 
+/**
+ * Closes a session left open by a crash (ended_at NULL), computing its duration
+ * from its own timestamps. Returns the session's task_id (or null) so the caller
+ * can re-sync that task's accumulated minutes.
+ */
+export async function closeOrphanSession(
+  id: string,
+  endedAt: string
+): Promise<string | null> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE sessions
+     SET ended_at = $1,
+         duration_minutes = MAX(0, CAST(ROUND((julianday($1) - julianday(started_at)) * 1440) AS INTEGER))
+     WHERE id = $2 AND ended_at IS NULL`,
+    [endedAt, id]
+  );
+  const rows = await db.select<Array<{ task_id: string | null }>>(
+    "SELECT task_id FROM sessions WHERE id = $1",
+    [id]
+  );
+  return rows[0]?.task_id ?? null;
+}
+
 export async function getSessionsByDateRange(
   from: string,
   to: string
@@ -605,17 +636,23 @@ export type FocusByList = {
   minutes: number;
 };
 
+/** Sentinel listId for focus time whose task (and thus list) no longer exists. */
+export const DELETED_LIST_ID = "__deleted__";
+
 export async function getFocusMinutesByList(from: string, to: string): Promise<FocusByList[]> {
   const db = await getDb();
+  // LEFT JOIN: sessions whose task was cascade-deleted with its list still count,
+  // bucketed under the DELETED_LIST_ID sentinel instead of vanishing from totals.
   const rows = await db.select<Array<{ list_id: string; minutes: number }>>(
-    `SELECT t.list_id, SUM(s.duration_minutes) as minutes
+    `SELECT COALESCE(t.list_id, '${DELETED_LIST_ID}') as list_id, SUM(s.duration_minutes) as minutes
      FROM sessions s
-     JOIN tasks t ON s.task_id = t.id
+     LEFT JOIN tasks t ON s.task_id = t.id
      WHERE s.session_type = 'focus'
+       AND s.task_id IS NOT NULL
        AND s.started_at >= $1
        AND s.started_at <= $2
        AND s.duration_minutes IS NOT NULL
-     GROUP BY t.list_id`,
+     GROUP BY COALESCE(t.list_id, '${DELETED_LIST_ID}')`,
     [from, to]
   );
   return rows.map((r) => ({ listId: r.list_id, minutes: r.minutes }));
@@ -629,13 +666,15 @@ export type DailyStats = {
 
 export async function getTasksCompletedPerDay(from: string, to: string): Promise<Array<{ date: string; count: number }>> {
   const db = await getDb();
+  // Timestamps are stored in UTC; bucketing converts to the user's local day so
+  // a task completed at 11pm doesn't land on tomorrow's bar in the chart.
   const rows = await db.select<Array<{ date: string; count: number }>>(
-    `SELECT date(completed_at) as date, COUNT(*) as count
+    `SELECT date(completed_at, 'localtime') as date, COUNT(*) as count
      FROM tasks
      WHERE status = 'done' AND parent_task_id IS NULL
        AND strftime('%Y-%m-%dT%H:%M:%fZ', completed_at) >= $1
        AND strftime('%Y-%m-%dT%H:%M:%fZ', completed_at) <= $2
-     GROUP BY date(completed_at)`,
+     GROUP BY date(completed_at, 'localtime')`,
     [from, to]
   );
   return rows;
@@ -644,13 +683,13 @@ export async function getTasksCompletedPerDay(from: string, to: string): Promise
 export async function getFocusMinutesPerDay(from: string, to: string): Promise<Array<{ date: string; focusMinutes: number }>> {
   const db = await getDb();
   const rows = await db.select<Array<{ date: string; focusMinutes: number }>>(
-    `SELECT date(started_at) as date, SUM(duration_minutes) as focusMinutes
+    `SELECT date(started_at, 'localtime') as date, SUM(duration_minutes) as focusMinutes
      FROM sessions
      WHERE session_type = 'focus'
        AND started_at >= $1
        AND started_at <= $2
        AND duration_minutes IS NOT NULL
-     GROUP BY date(started_at)`,
+     GROUP BY date(started_at, 'localtime')`,
     [from, to]
   );
   return rows;
@@ -678,7 +717,7 @@ export async function getSessionsWithTaskNames(from: string, to: string): Promis
 export async function getAllFocusSessionDates(): Promise<string[]> {
   const db = await getDb();
   const rows = await db.select<Array<{ date: string }>>(
-    "SELECT DISTINCT date(started_at) as date FROM sessions WHERE session_type = 'focus' AND duration_minutes IS NOT NULL ORDER BY date DESC"
+    "SELECT DISTINCT date(started_at, 'localtime') as date FROM sessions WHERE session_type = 'focus' AND duration_minutes IS NOT NULL ORDER BY date DESC"
   );
   return rows.map((r) => r.date);
 }
@@ -755,22 +794,40 @@ export async function setBlockerDomains(
   domains: string[]
 ): Promise<void> {
   const db = await getDb();
-  // No BEGIN/COMMIT: a multi-statement transaction is unreliable on the connection
-  // pool (see runBatchUpdate). DELETE then a single multi-row INSERT keeps this to two
-  // plain autocommit statements.
-  await db.execute("DELETE FROM blocker_domains WHERE profile_id = $1", [profileId]);
-
-  const cleaned = domains.map((d) => d.trim()).filter(Boolean);
-  if (cleaned.length === 0) return;
-
-  const params: unknown[] = [];
-  const valueGroups = cleaned.map((domain) => {
-    params.push(crypto.randomUUID(), profileId, domain);
-    const n = params.length;
-    return `($${n - 2}, $${n - 1}, $${n})`;
-  });
-  await db.execute(
-    `INSERT INTO blocker_domains (id, profile_id, domain) VALUES ${valueGroups.join(", ")}`,
-    params
+  // Diff-based update instead of DELETE-all + INSERT-all: a crash between the two
+  // statements can then lose at most the rows being changed, never the whole list.
+  // (No BEGIN/COMMIT: multi-statement transactions are unreliable on the
+  // connection pool — see runBatchUpdate.)
+  const cleaned = [...new Set(domains.map((d) => d.trim()).filter(Boolean))];
+  const existing = await db.select<Array<{ id: string; domain: string }>>(
+    "SELECT id, domain FROM blocker_domains WHERE profile_id = $1",
+    [profileId]
   );
+
+  const wanted = new Set(cleaned);
+  const existingDomains = new Set(existing.map((r) => r.domain));
+
+  const idsToDelete = existing.filter((r) => !wanted.has(r.domain)).map((r) => r.id);
+  const toInsert = cleaned.filter((d) => !existingDomains.has(d));
+
+  if (idsToDelete.length > 0) {
+    const placeholders = idsToDelete.map((_, i) => `$${i + 1}`).join(", ");
+    await db.execute(
+      `DELETE FROM blocker_domains WHERE id IN (${placeholders})`,
+      idsToDelete
+    );
+  }
+
+  if (toInsert.length > 0) {
+    const params: unknown[] = [];
+    const valueGroups = toInsert.map((domain) => {
+      params.push(crypto.randomUUID(), profileId, domain);
+      const n = params.length;
+      return `($${n - 2}, $${n - 1}, $${n})`;
+    });
+    await db.execute(
+      `INSERT INTO blocker_domains (id, profile_id, domain) VALUES ${valueGroups.join(", ")}`,
+      params
+    );
+  }
 }

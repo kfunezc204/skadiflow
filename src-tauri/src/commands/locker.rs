@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::net::ToSocketAddrs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -258,16 +258,76 @@ fn block_doh_firewall(warnings: &mut Vec<String>) -> bool {
 }
 
 // ── Layer 4: Registry DoH policies ───────────────────────────────────
+//
+// The pre-existing policy values are saved to a JSON file BEFORE overwriting,
+// and the restore writes back exactly what was there — a machine that already
+// had DoH policies (user- or org-managed) gets them back intact. A value that
+// did not exist before (`None`) is deleted on restore.
+
+/// Registry policy values as they were before we touched them.
+/// `None` = the value did not exist.
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone, Debug, PartialEq)]
+pub struct SavedDohPolicies {
+    pub chrome_mode: Option<String>,
+    pub edge_mode: Option<String>,
+    pub firefox_enabled: Option<u32>,
+}
+
+pub fn doh_state_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app data dir: {}", e))?;
+    Ok(dir.join("doh_state.json"))
+}
 
 #[cfg(target_os = "windows")]
-fn disable_browser_doh() {
+const CHROME_POLICY_KEY: &str = r"SOFTWARE\Policies\Google\Chrome";
+#[cfg(target_os = "windows")]
+const EDGE_POLICY_KEY: &str = r"SOFTWARE\Policies\Microsoft\Edge";
+#[cfg(target_os = "windows")]
+const FIREFOX_DOH_KEY: &str = r"SOFTWARE\Policies\Mozilla\Firefox\DNSOverHTTPS";
+
+#[cfg(target_os = "windows")]
+fn read_current_doh_policies() -> SavedDohPolicies {
     use winreg::enums::*;
     use winreg::RegKey;
 
-    for subkey in &[
-        r"SOFTWARE\Policies\Google\Chrome",
-        r"SOFTWARE\Policies\Microsoft\Edge",
-    ] {
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let read_str = |subkey: &str, value: &str| -> Option<String> {
+        hklm.open_subkey(subkey).ok()?.get_value::<String, _>(value).ok()
+    };
+    let read_u32 = |subkey: &str, value: &str| -> Option<u32> {
+        hklm.open_subkey(subkey).ok()?.get_value::<u32, _>(value).ok()
+    };
+
+    SavedDohPolicies {
+        chrome_mode: read_str(CHROME_POLICY_KEY, "DnsOverHttpsMode"),
+        edge_mode: read_str(EDGE_POLICY_KEY, "DnsOverHttpsMode"),
+        firefox_enabled: read_u32(FIREFOX_DOH_KEY, "Enabled"),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn disable_browser_doh(state_path: &Path) {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    // Save the pre-existing values once. If a state file already exists we are
+    // re-activating within a session (or after a crash) and the file already
+    // holds the true originals — never overwrite it with our own "off" values.
+    if !state_path.exists() {
+        let saved = read_current_doh_policies();
+        if let Some(parent) = state_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(text) = serde_json::to_string(&saved) {
+            let _ = fs::write(state_path, text);
+        }
+    }
+
+    for subkey in &[CHROME_POLICY_KEY, EDGE_POLICY_KEY] {
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         if let Ok(key) = hklm.create_subkey(subkey) {
             let _ = key.0.set_value("DnsOverHttpsMode", &"off");
@@ -277,34 +337,47 @@ fn disable_browser_doh() {
     // Firefox
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     if let Ok(_) = hklm.create_subkey(r"SOFTWARE\Policies\Mozilla\Firefox") {
-        if let Ok(dns_key) = hklm.create_subkey(r"SOFTWARE\Policies\Mozilla\Firefox\DNSOverHTTPS") {
+        if let Ok(dns_key) = hklm.create_subkey(FIREFOX_DOH_KEY) {
             let _ = dns_key.0.set_value("Enabled", &0u32);
         }
     }
 }
 
 #[cfg(target_os = "windows")]
-fn restore_browser_doh() {
+fn restore_browser_doh(state_path: &Path) {
     use winreg::enums::*;
     use winreg::RegKey;
 
-    for subkey in &[
-        r"SOFTWARE\Policies\Google\Chrome",
-        r"SOFTWARE\Policies\Microsoft\Edge",
-    ] {
-        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    // No saved state = we never changed anything (or already restored) —
+    // foreign policy values are not ours to delete.
+    let Some(saved) = fs::read_to_string(state_path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<SavedDohPolicies>(&t).ok())
+    else {
+        return;
+    };
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+
+    let restore_str = |subkey: &str, value_name: &str, original: &Option<String>| {
         if let Ok(key) = hklm.open_subkey_with_flags(subkey, KEY_WRITE) {
-            let _ = key.delete_value("DnsOverHttpsMode");
+            match original {
+                Some(v) => { let _ = key.set_value(value_name, v); }
+                None => { let _ = key.delete_value(value_name); }
+            }
+        }
+    };
+    restore_str(CHROME_POLICY_KEY, "DnsOverHttpsMode", &saved.chrome_mode);
+    restore_str(EDGE_POLICY_KEY, "DnsOverHttpsMode", &saved.edge_mode);
+
+    if let Ok(key) = hklm.open_subkey_with_flags(FIREFOX_DOH_KEY, KEY_WRITE) {
+        match saved.firefox_enabled {
+            Some(v) => { let _ = key.set_value("Enabled", &v); }
+            None => { let _ = key.delete_value("Enabled"); }
         }
     }
 
-    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    if let Ok(key) = hklm.open_subkey_with_flags(
-        r"SOFTWARE\Policies\Mozilla\Firefox\DNSOverHTTPS",
-        KEY_WRITE,
-    ) {
-        let _ = key.delete_value("Enabled");
-    }
+    let _ = fs::remove_file(state_path);
 }
 
 // ── Layer 5: Flush DNS caches ────────────────────────────────────────
@@ -382,7 +455,19 @@ pub fn check_locker_permission() -> bool {
 }
 
 #[tauri::command]
-pub fn activate_locker(domains: Vec<String>) -> Result<LockerResult, String> {
+pub async fn activate_locker(
+    app: tauri::AppHandle,
+    domains: Vec<String>,
+) -> Result<LockerResult, String> {
+    // DNS resolution, netsh and PowerShell are all blocking — run the whole
+    // activation off the async runtime so the UI never freezes.
+    let doh_path = doh_state_path(&app)?;
+    tauri::async_runtime::spawn_blocking(move || activate_locker_impl(domains, &doh_path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn activate_locker_impl(domains: Vec<String>, doh_state: &Path) -> Result<LockerResult, String> {
     let mut result = LockerResult::default();
 
     // ── Layer 0: Resolve real IPs BEFORE modifying hosts file ─────
@@ -412,7 +497,7 @@ pub fn activate_locker(domains: Vec<String>) -> Result<LockerResult, String> {
         // ── Layer 4: Registry policies to disable DoH ────────────
         // Only takes effect on next browser launch, but prevents DoH
         // re-activation during long focus sessions.
-        disable_browser_doh();
+        disable_browser_doh(doh_state);
 
         // ── Layer 5: Flush OS DNS caches ─────────────────────────
         // Clears the Windows DNS Client cache so new lookups go to hosts file.
@@ -421,6 +506,7 @@ pub fn activate_locker(domains: Vec<String>) -> Result<LockerResult, String> {
 
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = doh_state;
         let _ = std::process::Command::new("dscacheutil")
             .args(["-flushcache"])
             .output();
@@ -431,7 +517,14 @@ pub fn activate_locker(domains: Vec<String>) -> Result<LockerResult, String> {
 }
 
 #[tauri::command]
-pub fn deactivate_locker() -> Result<(), String> {
+pub async fn deactivate_locker(app: tauri::AppHandle) -> Result<(), String> {
+    let doh_path = doh_state_path(&app)?;
+    tauri::async_runtime::spawn_blocking(move || deactivate_locker_impl(&doh_path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn deactivate_locker_impl(doh_state: &Path) -> Result<(), String> {
     let path = hosts_file_path();
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let clean = remove_locker_block(&content);
@@ -440,7 +533,11 @@ pub fn deactivate_locker() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         remove_all_firewall_rules();
-        restore_browser_doh();
+        restore_browser_doh(doh_state);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = doh_state;
     }
 
     Ok(())

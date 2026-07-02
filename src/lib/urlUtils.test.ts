@@ -35,6 +35,17 @@ describe("extractUrls", () => {
   it("ignores file-extension-looking strings that are not real domains", () => {
     expect(extractUrls("update file.txt and image.png")).toEqual([]);
   });
+
+  it("does not treat email addresses as URLs", () => {
+    expect(extractUrls("escribir a juan@gmail.com sobre la reunión")).toEqual([]);
+    expect(extractUrls("cc: maria.lopez@empresa.io y pedro@sub.dominio.co")).toEqual([]);
+  });
+
+  it("still extracts a domain that merely appears near an email", () => {
+    expect(extractUrls("mandar juan@gmail.com el link de linear.app/team")).toEqual([
+      "https://linear.app/team",
+    ]);
+  });
 });
 
 describe("getHostname", () => {

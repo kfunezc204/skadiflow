@@ -134,6 +134,22 @@ export const useTaskStore = create<TaskState & TaskActions>((set, get) => ({
 
   updateTask: async (id, fields) => {
     await dbUpdateTask(id, fields);
+    // A generic update that sets status to done must behave like completeTask
+    // in memory too: stamp completedAt and drop the task from the board.
+    if (fields.status === "done") {
+      const now = new Date().toISOString();
+      set((state) => {
+        const completed: Task[] = state.tasks
+          .filter((t) => t.id === id)
+          .map((t) => ({ ...t, status: "done" as TaskStatus, completedAt: now }));
+        return {
+          tasks: state.tasks.filter((t) => t.id !== id),
+          doneTasks: [...completed, ...state.doneTasks],
+          selectedTaskId: state.selectedTaskId === id ? null : state.selectedTaskId,
+        };
+      });
+      return;
+    }
     set((state) => ({
       tasks: state.tasks.map((t) =>
         t.id === id

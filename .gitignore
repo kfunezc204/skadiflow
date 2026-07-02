@@ -25,7 +25,9 @@ dist-ssr
 
 # Internal planning documents
 Plan.md
-PRD.md
+PRD*.md
+LAUNCH_STRATEGY.md
+features-to-implement.md
 
 # Claude Code local settings
 .claude/

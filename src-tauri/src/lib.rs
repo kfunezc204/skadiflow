@@ -27,6 +27,12 @@ pub fn run() {
             sql: include_str!("./migrations/003_subtasks.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "repair session durations corrupted by pause/resume double-counting",
+            sql: include_str!("./migrations/004_repair_session_durations.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -62,12 +68,12 @@ pub fn run() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("SkadiFlow")
                 .menu(&menu)
-                .menu_on_left_click(false)
+                .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
                     let Some(window) = app.get_webview_window("main") else {
                         // Quit still works without the main window
                         if event.id().as_ref() == "quit" {
-                            let _ = commands::proxy_blocker::deactivate_proxy_blocker();
+                            commands::proxy_blocker::deactivate_on_exit(app);
                             app.exit(0);
                         }
                         return;
@@ -87,7 +93,7 @@ pub fn run() {
                             let _ = window.emit("quick-add", ());
                         }
                         "quit" => {
-                            let _ = commands::proxy_blocker::deactivate_proxy_blocker();
+                            commands::proxy_blocker::deactivate_on_exit(app);
                             app.exit(0);
                         }
                         _ => {}
@@ -121,9 +127,12 @@ pub fn run() {
                 let _ = webview.set_background_color(Some(Color(0, 0, 0, 0)));
             }
 
-            // Clean up stale proxy settings from a previous crash
+            // Clean up stale proxy settings from a previous crash. The persisted
+            // state file records OUR port, so third-party local proxies are safe.
             #[cfg(target_os = "windows")]
-            commands::proxy_blocker::cleanup_stale_proxy();
+            if let Ok(state_path) = commands::proxy_blocker::proxy_state_path(app.handle()) {
+                commands::proxy_blocker::cleanup_stale_proxy(&state_path);
+            }
 
             // Start the local blocking proxy server (runs on tokio runtime)
             tauri::async_runtime::spawn(async {
@@ -138,8 +147,9 @@ pub fn run() {
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { .. } = event {
-                    // Restore proxy settings before exit to avoid leaving a dead proxy
-                    let _ = commands::proxy_blocker::deactivate_proxy_blocker();
+                    // Guarded restore: a no-op unless OUR proxy is active, so a
+                    // user's own proxy config always survives app shutdown.
+                    commands::proxy_blocker::deactivate_on_exit(window.app_handle());
                     window.app_handle().exit(0);
                 }
             }

@@ -5,6 +5,7 @@ import { toast } from "@/lib/toast";
 import {
   createSession as dbCreateSession,
   endSession as dbEndSession,
+  closeOrphanSession,
   getSetting,
   setSetting,
   getTaskTotalFocusMinutes,
@@ -14,6 +15,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { broadcastTimerState } from "@/lib/timerBridge";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { extractUrls } from "@/lib/urlUtils";
+import {
+  type PhaseClock,
+  startPhase,
+  pause as pauseClock,
+  resume as resumeClock,
+  elapsedSeconds,
+  remainingSeconds,
+  isComplete,
+  sessionMinutes,
+} from "@/lib/timerEngine";
 
 export type TimerPhase = "focus" | "short_break" | "long_break";
 export type TimerStatus = "idle" | "running" | "paused";
@@ -30,16 +41,29 @@ export type CompletedInterval = {
 type TimerState = {
   phase: TimerPhase;
   status: TimerStatus;
+  /**
+   * Wall-clock source of truth for the current phase. `secondsRemaining` and
+   * `taskElapsedFocusSeconds` are values DERIVED from this clock on each tick —
+   * the interval only refreshes the UI, it never counts time itself.
+   */
+  clock: PhaseClock | null;
   secondsRemaining: number;
   totalSeconds: number;
   currentCycle: number;
   activeTaskId: string | null;
   taskQueue: string[];
   activeSessionId: string | null;
+  /** Phase-elapsed seconds at the moment the active session started (see sessionMinutes). */
+  sessionStartElapsedSeconds: number;
   completedIntervals: CompletedInterval[];
   isLoaded: boolean;
   isLockerEnabled: boolean;
+  /** Derived: taskSeedSeconds + (phase elapsed − taskAnchorElapsedSeconds) during focus. */
   taskElapsedFocusSeconds: number;
+  /** Focus seconds the active task had accumulated before/outside the current phase. */
+  taskSeedSeconds: number;
+  /** Phase-elapsed seconds at the moment the active task became active within this phase. */
+  taskAnchorElapsedSeconds: number;
   activeSubtaskIndex: number;
   activeSubtaskTitle: string | null;
   isExtraTime: boolean;
@@ -66,6 +90,7 @@ type TimerActions = {
 
 // Module-scoped interval — survives route changes (store is a singleton)
 let intervalId: ReturnType<typeof setInterval> | null = null;
+let lastPersistAtMs = 0;
 
 function clearIntervalSafe() {
   if (intervalId !== null) {
@@ -92,6 +117,13 @@ function getPhaseSeconds(phase: TimerPhase): number {
     case "short_break": return s.pomodoroShortBreakMinutes * 60;
     case "long_break":  return s.pomodoroLongBreakMinutes * 60;
   }
+}
+
+/** End the active session, crediting only its own span (never the whole phase). */
+async function endActiveSession(state: TimerState, nowMs: number): Promise<void> {
+  if (!state.activeSessionId || !state.clock) return;
+  const duration = sessionMinutes(state.sessionStartElapsedSeconds, state.clock, nowMs);
+  await dbEndSession(state.activeSessionId, new Date(nowMs).toISOString(), duration);
 }
 
 async function activateLocker() {
@@ -205,19 +237,41 @@ async function deactivateLockerSafe() {
   }
 }
 
+const PERSIST_KEYS = [
+  "timer_status",
+  "timer_phase",
+  "timer_current_cycle",
+  "timer_active_task_id",
+  "timer_task_queue",
+  "timer_last_tick_at",
+  "timer_active_session_id",
+  "timer_task_elapsed_focus_seconds",
+  "timer_clock_duration_seconds",
+  "timer_clock_started_at_ms",
+  "timer_clock_paused_at_ms",
+  "timer_clock_paused_accum_ms",
+  // Legacy key from the decrement-based timer — kept in the clear list so
+  // upgrading users don't resurrect a stale value.
+  "timer_seconds_remaining",
+];
+
 export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
   phase: "focus",
   status: "idle",
+  clock: null,
   secondsRemaining: 25 * 60,
   totalSeconds: 25 * 60,
   currentCycle: 1,
   activeTaskId: null,
   taskQueue: [],
   activeSessionId: null,
+  sessionStartElapsedSeconds: 0,
   completedIntervals: [],
   isLoaded: false,
   isLockerEnabled: false,
   taskElapsedFocusSeconds: 0,
+  taskSeedSeconds: 0,
+  taskAnchorElapsedSeconds: 0,
   activeSubtaskIndex: 0,
   activeSubtaskTitle: null,
   isExtraTime: false,
@@ -237,22 +291,26 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     const phase: TimerPhase = "focus";
     const total = getPhaseSeconds(phase);
     const sessionId = crypto.randomUUID();
-    const now = new Date().toISOString();
+    const now = Date.now();
 
-    await dbCreateSession(sessionId, taskIds[0], phase, now);
+    await dbCreateSession(sessionId, taskIds[0], phase, new Date(now).toISOString());
 
     set({
       phase,
       status: "running",
+      clock: startPhase(total, now),
       secondsRemaining: total,
       totalSeconds: total,
       currentCycle: 1,
       activeTaskId: taskIds[0],
       taskQueue: taskIds.slice(1),
       activeSessionId: sessionId,
+      sessionStartElapsedSeconds: 0,
       completedIntervals: [],
       isLockerEnabled: shouldLock,
       taskElapsedFocusSeconds: 0,
+      taskSeedSeconds: 0,
+      taskAnchorElapsedSeconds: 0,
       activeSubtaskIndex: 0,
       isExtraTime: false,
     });
@@ -260,7 +318,11 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     // Seed elapsed/index to skip already-completed subtasks
     const seed = await seedSubtaskProgress(taskIds[0]);
     if (seed.taskElapsedFocusSeconds > 0 || seed.activeSubtaskIndex > 0) {
-      set(seed);
+      set({
+        taskElapsedFocusSeconds: seed.taskElapsedFocusSeconds,
+        taskSeedSeconds: seed.taskElapsedFocusSeconds,
+        activeSubtaskIndex: seed.activeSubtaskIndex,
+      });
     }
     set({ activeSubtaskTitle: getActiveSubtaskTitle(taskIds[0], seed.activeSubtaskIndex) });
 
@@ -288,22 +350,26 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
 
   tick: async () => {
     const state = get();
-    if (state.status !== "running") return;
+    if (state.status !== "running" || !state.clock) return;
+    const now = Date.now();
 
-    const next = state.secondsRemaining - 1;
-    if (next <= 0) {
+    if (isComplete(state.clock, now)) {
       set({ secondsRemaining: 0 });
       clearIntervalSafe();
       await get().nextPhase();
       return;
     }
 
-    set({ secondsRemaining: next });
+    const updates: Partial<TimerState> = {
+      secondsRemaining: remainingSeconds(state.clock, now),
+    };
 
     // Estimate tracking — only during focus phase
     if (state.phase === "focus") {
-      const newElapsed = state.taskElapsedFocusSeconds + 1;
-      const updates: Partial<TimerState> = { taskElapsedFocusSeconds: newElapsed };
+      const prevElapsed = state.taskElapsedFocusSeconds;
+      const newElapsed =
+        state.taskSeedSeconds + elapsedSeconds(state.clock, now) - state.taskAnchorElapsedSeconds;
+      updates.taskElapsedFocusSeconds = newElapsed;
 
       const activeTask = useTaskStore.getState().tasks.find((t) => t.id === state.activeTaskId);
       const subtaskList = state.activeTaskId
@@ -362,69 +428,83 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         }
       }
 
-      // Mid-session reminder notifications
+      // Mid-session reminder notifications. Interval-boundary CROSSING (not
+      // modulo) so a throttled tick that jumps several seconds can't skip one.
       const { notificationsEnabled, reminderIntervalMinutes } = useSettingsStore.getState();
-      if (
-        notificationsEnabled &&
-        reminderIntervalMinutes > 0 &&
-        newElapsed > 0 &&
-        newElapsed % (reminderIntervalMinutes * 60) === 0
-      ) {
-        const minutesIn = Math.round(newElapsed / 60);
-        try {
-          const { sendNotification } = await import("@tauri-apps/plugin-notification");
-          await sendNotification({
-            title: "Focus check-in",
-            body: `${minutesIn} min in — keep going!`,
-          });
-        } catch (e) {
-          console.warn("Reminder notification failed:", e);
+      if (notificationsEnabled && reminderIntervalMinutes > 0 && newElapsed > 0) {
+        const intervalSec = reminderIntervalMinutes * 60;
+        if (Math.floor(newElapsed / intervalSec) > Math.floor(prevElapsed / intervalSec)) {
+          const minutesIn = Math.round(newElapsed / 60);
+          try {
+            const { sendNotification } = await import("@tauri-apps/plugin-notification");
+            await sendNotification({
+              title: "Focus check-in",
+              body: `${minutesIn} min in — keep going!`,
+            });
+          } catch (e) {
+            console.warn("Reminder notification failed:", e);
+          }
         }
       }
+    } else {
+      set(updates);
     }
 
     await get().broadcastCurrentState();
 
-    if (next % 30 === 0) {
+    if (now - lastPersistAtMs >= 30_000) {
       await get().persistState();
     }
   },
 
   pause: async () => {
     const state = get();
-    if (state.status !== "running") return;
+    if (state.status !== "running" || !state.clock) return;
+    const now = Date.now();
 
     clearIntervalSafe();
 
-    if (state.activeSessionId) {
-      const now = new Date().toISOString();
-      const totalSec = getPhaseSeconds(state.phase);
-      const elapsed = totalSec - state.secondsRemaining;
-      await dbEndSession(state.activeSessionId, now, Math.round(elapsed / 60));
-      if (state.phase === "focus") {
-        await syncTaskActualMinutes(state.activeTaskId);
-      }
+    await endActiveSession(state, now);
+    if (state.activeSessionId && state.phase === "focus") {
+      await syncTaskActualMinutes(state.activeTaskId);
     }
 
-    set({ status: "paused", activeSessionId: null });
+    const clock = pauseClock(state.clock, now);
+    set({
+      status: "paused",
+      activeSessionId: null,
+      clock,
+      secondsRemaining: remainingSeconds(clock, now),
+    });
     await get().persistState();
     await get().broadcastCurrentState();
   },
 
   resume: async () => {
     const state = get();
-    if (state.status !== "paused") return;
+    if (state.status !== "paused" || !state.clock) return;
+    const now = Date.now();
 
+    const clock = resumeClock(state.clock, now);
     const sessionId = crypto.randomUUID();
-    const now = new Date().toISOString();
-    await dbCreateSession(sessionId, state.activeTaskId, phaseToSessionType(state.phase), now);
+    await dbCreateSession(
+      sessionId,
+      state.activeTaskId,
+      phaseToSessionType(state.phase),
+      new Date(now).toISOString()
+    );
 
     // Re-activate locker when resuming into a focus phase
     if (state.phase === "focus" && state.isLockerEnabled) {
       activateLocker().catch(console.warn);
     }
 
-    set({ status: "running", activeSessionId: sessionId });
+    set({
+      status: "running",
+      activeSessionId: sessionId,
+      clock,
+      sessionStartElapsedSeconds: elapsedSeconds(clock, now),
+    });
     startInterval();
     await get().persistState();
     await get().broadcastCurrentState();
@@ -433,15 +513,13 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
   skip: async () => {
     const state = get();
     if (state.status === "idle") return;
+    const now = Date.now();
 
     clearIntervalSafe();
 
-    // End current session early
+    // End current session early — credit only its own span
     if (state.activeSessionId) {
-      const now = new Date().toISOString();
-      const totalSec = getPhaseSeconds(state.phase);
-      const elapsed = totalSec - state.secondsRemaining;
-      await dbEndSession(state.activeSessionId, now, Math.round(elapsed / 60));
+      await endActiveSession(state, now);
       set({ activeSessionId: null });
     }
 
@@ -451,22 +529,29 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       if (nextTask) {
         const total = getPhaseSeconds("focus");
         const sessionId = crypto.randomUUID();
-        const now = new Date().toISOString();
-        await dbCreateSession(sessionId, nextTask, "focus", now);
+        await dbCreateSession(sessionId, nextTask, "focus", new Date(now).toISOString());
         set({
           activeTaskId: nextTask,
           taskQueue: rest,
+          clock: startPhase(total, now),
           secondsRemaining: total,
           totalSeconds: total,
           activeSessionId: sessionId,
+          sessionStartElapsedSeconds: 0,
           status: "running",
           taskElapsedFocusSeconds: 0,
+          taskSeedSeconds: 0,
+          taskAnchorElapsedSeconds: 0,
           activeSubtaskIndex: 0,
           isExtraTime: false,
         });
         const skipSeed = await seedSubtaskProgress(nextTask);
         if (skipSeed.taskElapsedFocusSeconds > 0 || skipSeed.activeSubtaskIndex > 0) {
-          set(skipSeed);
+          set({
+            taskElapsedFocusSeconds: skipSeed.taskElapsedFocusSeconds,
+            taskSeedSeconds: skipSeed.taskElapsedFocusSeconds,
+            activeSubtaskIndex: skipSeed.activeSubtaskIndex,
+          });
         }
         set({ activeSubtaskTitle: getActiveSubtaskTitle(nextTask, skipSeed.activeSubtaskIndex) });
         await openTaskUrls(nextTask);
@@ -480,8 +565,7 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       // Skip break → jump straight to focus
       const total = getPhaseSeconds("focus");
       const sessionId = crypto.randomUUID();
-      const now = new Date().toISOString();
-      await dbCreateSession(sessionId, state.activeTaskId, "focus", now);
+      await dbCreateSession(sessionId, state.activeTaskId, "focus", new Date(now).toISOString());
 
       if (state.isLockerEnabled && !useSettingsStore.getState().lockerDuringBreaks) {
         await activateLocker();
@@ -489,9 +573,12 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
 
       set({
         phase: "focus",
+        clock: startPhase(total, now),
         secondsRemaining: total,
         totalSeconds: total,
         activeSessionId: sessionId,
+        sessionStartElapsedSeconds: 0,
+        taskAnchorElapsedSeconds: 0,
         status: "running",
       });
       startInterval();
@@ -508,10 +595,15 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       set({ isMarkingDone: false });
       return;
     }
+    const now = Date.now();
 
     const completedTitle =
       useTaskStore.getState().tasks.find((t) => t.id === state.activeTaskId)?.title ?? "Task";
 
+    // Close the running session against the finished task BEFORE completing it,
+    // so its focus time is attributed to the task that actually used it.
+    await endActiveSession(state, now);
+    set({ activeSessionId: null });
     await syncTaskActualMinutes(state.activeTaskId);
     await useTaskStore.getState().completeTask(state.activeTaskId);
 
@@ -558,16 +650,30 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
     // In-app toast for when the window is visible
     toast(`✅ "${completedTitle}" done → Now: "${nextTitle}"`);
 
+    // The phase keeps running; a NEW session (anchored at the current phase
+    // elapsed) attributes the rest of the pomodoro to the next task.
+    const currentElapsed = state.clock ? elapsedSeconds(state.clock, now) : 0;
+    const sessionId = crypto.randomUUID();
+    await dbCreateSession(sessionId, nextTask, "focus", new Date(now).toISOString());
+
     set({
       activeTaskId: nextTask,
       taskQueue: rest,
+      activeSessionId: sessionId,
+      sessionStartElapsedSeconds: currentElapsed,
       taskElapsedFocusSeconds: 0,
+      taskSeedSeconds: 0,
+      taskAnchorElapsedSeconds: currentElapsed,
       activeSubtaskIndex: 0,
       isExtraTime: false,
     });
     const doneSeed = await seedSubtaskProgress(nextTask);
     if (doneSeed.taskElapsedFocusSeconds > 0 || doneSeed.activeSubtaskIndex > 0) {
-      set(doneSeed);
+      set({
+        taskElapsedFocusSeconds: doneSeed.taskElapsedFocusSeconds,
+        taskSeedSeconds: doneSeed.taskElapsedFocusSeconds,
+        activeSubtaskIndex: doneSeed.activeSubtaskIndex,
+      });
     }
     set({ activeSubtaskTitle: getActiveSubtaskTitle(nextTask, doneSeed.activeSubtaskIndex) });
     await openTaskUrls(nextTask);
@@ -624,17 +730,22 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       return;
     }
 
-    // Advance elapsed so tick() doesn't re-complete the just-finished subtask
+    // Advance elapsed so tick() doesn't re-complete the just-finished subtask.
+    // Re-anchor the derived elapsed at the new floor.
     let cumulativeSeconds = 0;
     for (let i = 0; i <= pendingIdx; i++) {
       cumulativeSeconds += (subtaskList[i].estimatedMinutes ?? 0) * 60;
     }
+    const now = Date.now();
+    const engineElapsed = state.clock ? elapsedSeconds(state.clock, now) : 0;
     const newElapsed = Math.max(state.taskElapsedFocusSeconds, cumulativeSeconds);
 
     set({
       activeSubtaskIndex: nextPendingIdx,
       activeSubtaskTitle: getActiveSubtaskTitle(state.activeTaskId, nextPendingIdx),
       taskElapsedFocusSeconds: newElapsed,
+      taskSeedSeconds: newElapsed,
+      taskAnchorElapsedSeconds: engineElapsed,
       isExtraTime: false,
       isMarkingDone: false,
     });
@@ -647,12 +758,13 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
   nextPhase: async () => {
     const state = get();
     const settings = useSettingsStore.getState();
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
 
-    // Log completed interval — phase reached 0, so record the full configured duration
-    if (state.activeSessionId) {
-      const now = new Date().toISOString();
-      const fullDuration = Math.round(getPhaseSeconds(state.phase) / 60);
-      await dbEndSession(state.activeSessionId, now, fullDuration);
+    // Log completed interval — credit only this session's span within the phase
+    if (state.activeSessionId && state.clock) {
+      const duration = sessionMinutes(state.sessionStartElapsedSeconds, state.clock, now);
+      await dbEndSession(state.activeSessionId, nowIso, duration);
 
       const taskTitle = state.activeTaskId
         ? (useTaskStore.getState().tasks.find((t) => t.id === state.activeTaskId)?.title ?? null)
@@ -666,15 +778,30 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
             taskId: state.activeTaskId,
             taskTitle,
             phase: state.phase,
-            durationMinutes: fullDuration,
-            endedAt: now,
+            durationMinutes: duration,
+            endedAt: nowIso,
           },
         ],
       }));
     }
 
-    // Sync actual minutes after focus phase ends
+    // Fold this phase's focus time into the task's accumulated seed. The phase
+    // elapsed is capped at the duration so a phase-end observed hours late
+    // (suspend) doesn't inflate the task's elapsed.
     if (state.phase === "focus") {
+      if (state.clock) {
+        const phaseElapsed = Math.min(
+          elapsedSeconds(state.clock, now),
+          state.clock.durationSeconds
+        );
+        const finalElapsed =
+          state.taskSeedSeconds + phaseElapsed - state.taskAnchorElapsedSeconds;
+        set({
+          taskElapsedFocusSeconds: finalElapsed,
+          taskSeedSeconds: finalElapsed,
+          taskAnchorElapsedSeconds: 0,
+        });
+      }
       await syncTaskActualMinutes(state.activeTaskId);
     }
 
@@ -689,16 +816,17 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       const newCycle = isLongBreak ? 1 : state.currentCycle + 1;
       const total = getPhaseSeconds(nextPhase);
       const sessionId = crypto.randomUUID();
-      const now = new Date().toISOString();
 
-      await dbCreateSession(sessionId, null, "break", now);
+      await dbCreateSession(sessionId, null, "break", nowIso);
 
       set({
         phase: nextPhase,
+        clock: startPhase(total, now),
         secondsRemaining: total,
         totalSeconds: total,
         currentCycle: newCycle,
         activeSessionId: sessionId,
+        sessionStartElapsedSeconds: 0,
       });
 
       if (state.isLockerEnabled && !settings.lockerDuringBreaks) {
@@ -728,13 +856,15 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
 
       if (settings.autoStartNextPomodoro) {
         const sessionId = crypto.randomUUID();
-        const now = new Date().toISOString();
-        await dbCreateSession(sessionId, state.activeTaskId, "focus", now);
+        await dbCreateSession(sessionId, state.activeTaskId, "focus", nowIso);
         set({
           phase: "focus",
+          clock: startPhase(total, now),
           secondsRemaining: total,
           totalSeconds: total,
           activeSessionId: sessionId,
+          sessionStartElapsedSeconds: 0,
+          taskAnchorElapsedSeconds: 0,
         });
         if (state.isLockerEnabled && !settings.lockerDuringBreaks) {
           await activateLocker();
@@ -743,9 +873,12 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         // User must manually resume — pause at the start of the next focus interval
         set({
           phase: "focus",
+          clock: pauseClock(startPhase(total, now), now),
           secondsRemaining: total,
           totalSeconds: total,
           activeSessionId: null,
+          sessionStartElapsedSeconds: 0,
+          taskAnchorElapsedSeconds: 0,
           status: "paused",
         });
       }
@@ -780,12 +913,10 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
   endSession: async () => {
     clearIntervalSafe();
     const state = get();
+    const now = Date.now();
 
     if (state.activeSessionId) {
-      const now = new Date().toISOString();
-      const totalSec = getPhaseSeconds(state.phase);
-      const elapsed = totalSec - state.secondsRemaining;
-      await dbEndSession(state.activeSessionId, now, Math.round(elapsed / 60));
+      await endActiveSession(state, now);
       if (state.phase === "focus") {
         await syncTaskActualMinutes(state.activeTaskId);
       }
@@ -795,33 +926,26 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
       await deactivateLockerSafe();
     }
 
-    const clearKeys = [
-      "timer_status",
-      "timer_phase",
-      "timer_seconds_remaining",
-      "timer_current_cycle",
-      "timer_active_task_id",
-      "timer_task_queue",
-      "timer_last_tick_at",
-      "timer_active_session_id",
-      "timer_task_elapsed_focus_seconds",
-    ];
-    await Promise.all(clearKeys.map((k) => setSetting(k, "").catch(() => {})));
+    await Promise.all(PERSIST_KEYS.map((k) => setSetting(k, "").catch(() => {})));
 
     toast("Focus session complete");
 
     set({
       phase: "focus",
       status: "idle",
+      clock: null,
       secondsRemaining: getPhaseSeconds("focus"),
       totalSeconds: getPhaseSeconds("focus"),
       currentCycle: 1,
       activeTaskId: null,
       taskQueue: [],
       activeSessionId: null,
+      sessionStartElapsedSeconds: 0,
       completedIntervals: [],
       isLockerEnabled: false,
       taskElapsedFocusSeconds: 0,
+      taskSeedSeconds: 0,
+      taskAnchorElapsedSeconds: 0,
       activeSubtaskIndex: 0,
       activeSubtaskTitle: null,
       isExtraTime: false,
@@ -843,65 +967,112 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
 
   persistState: async () => {
     const state = get();
+    lastPersistAtMs = Date.now();
     await Promise.all(
       [
         setSetting("timer_status", state.status),
         setSetting("timer_phase", state.phase),
-        setSetting("timer_seconds_remaining", String(state.secondsRemaining)),
         setSetting("timer_current_cycle", String(state.currentCycle)),
         setSetting("timer_active_task_id", state.activeTaskId ?? ""),
         setSetting("timer_task_queue", JSON.stringify(state.taskQueue)),
         setSetting("timer_last_tick_at", new Date().toISOString()),
         setSetting("timer_active_session_id", state.activeSessionId ?? ""),
         setSetting("timer_task_elapsed_focus_seconds", String(state.taskElapsedFocusSeconds)),
+        setSetting("timer_clock_duration_seconds", state.clock ? String(state.clock.durationSeconds) : ""),
+        setSetting("timer_clock_started_at_ms", state.clock ? String(state.clock.startedAtMs) : ""),
+        setSetting("timer_clock_paused_at_ms", state.clock?.pausedAtMs != null ? String(state.clock.pausedAtMs) : ""),
+        setSetting("timer_clock_paused_accum_ms", state.clock ? String(state.clock.pausedAccumMs) : ""),
       ].map((p) => p.catch(() => {}))
     );
   },
 
   loadPersistedTimer: async () => {
     try {
-      const [statusVal, phaseVal, secRemVal, cycleVal, taskIdVal, queueVal, lastTickVal, elapsedVal] =
-        await Promise.all([
-          getSetting("timer_status"),
-          getSetting("timer_phase"),
-          getSetting("timer_seconds_remaining"),
-          getSetting("timer_current_cycle"),
-          getSetting("timer_active_task_id"),
-          getSetting("timer_task_queue"),
-          getSetting("timer_last_tick_at"),
-          getSetting("timer_task_elapsed_focus_seconds"),
-        ]);
+      const [
+        statusVal,
+        phaseVal,
+        cycleVal,
+        taskIdVal,
+        queueVal,
+        lastTickVal,
+        sessionIdVal,
+        elapsedVal,
+        clockDurVal,
+        clockStartVal,
+        clockPausedAtVal,
+        clockPausedAccumVal,
+      ] = await Promise.all([
+        getSetting("timer_status"),
+        getSetting("timer_phase"),
+        getSetting("timer_current_cycle"),
+        getSetting("timer_active_task_id"),
+        getSetting("timer_task_queue"),
+        getSetting("timer_last_tick_at"),
+        getSetting("timer_active_session_id"),
+        getSetting("timer_task_elapsed_focus_seconds"),
+        getSetting("timer_clock_duration_seconds"),
+        getSetting("timer_clock_started_at_ms"),
+        getSetting("timer_clock_paused_at_ms"),
+        getSetting("timer_clock_paused_accum_ms"),
+      ]);
 
       set({ isLoaded: true });
 
+      // A crash may have left a session without an end. Close it at the last
+      // persisted tick so the time worked before the crash isn't lost.
+      if (sessionIdVal) {
+        try {
+          const orphanTaskId = await closeOrphanSession(
+            sessionIdVal,
+            lastTickVal || new Date().toISOString()
+          );
+          if (orphanTaskId) {
+            await syncTaskActualMinutes(orphanTaskId);
+          }
+        } catch (e) {
+          console.warn("Orphan session cleanup failed:", e);
+        }
+      }
+
       if (!statusVal || statusVal === "" || statusVal === "idle") return;
+      // Pre-wall-clock persisted state (upgrade path) has no clock — treat as idle.
+      if (!clockDurVal || !clockStartVal) return;
 
       const status = statusVal as TimerStatus;
       const phase = (phaseVal as TimerPhase) ?? "focus";
-      let secondsRemaining = secRemVal ? parseInt(secRemVal) : getPhaseSeconds(phase);
+      const now = Date.now();
 
-      // Correct for wall-clock drift
-      if (status === "running" && lastTickVal) {
-        const elapsed = Math.floor((Date.now() - new Date(lastTickVal).getTime()) / 1000);
-        secondsRemaining = Math.max(0, secondsRemaining - elapsed);
-      }
+      let clock: PhaseClock = {
+        durationSeconds: parseInt(clockDurVal),
+        startedAtMs: parseInt(clockStartVal),
+        pausedAtMs: clockPausedAtVal ? parseInt(clockPausedAtVal) : null,
+        pausedAccumMs: clockPausedAccumVal ? parseInt(clockPausedAccumVal) : 0,
+      };
+      // If it was running when the app closed, pause it now — the user decides
+      // when to resume. Wall time while closed has already been consumed by the
+      // clock, exactly like the old drift correction.
+      clock = pauseClock(clock, now);
 
       const taskQueue: string[] = queueVal ? (JSON.parse(queueVal) as string[]) : [];
       const activeTaskId = taskIdVal || null;
       const currentCycle = cycleVal ? parseInt(cycleVal) : 1;
-      const totalSeconds = getPhaseSeconds(phase);
       const taskElapsedFocusSeconds = elapsedVal ? parseInt(elapsedVal) : 0;
+      const secondsRemaining = remainingSeconds(clock, now);
 
       set({
         phase,
         status: "paused",
+        clock,
         secondsRemaining,
-        totalSeconds,
+        totalSeconds: clock.durationSeconds,
         currentCycle,
         activeTaskId,
         taskQueue,
         activeSessionId: null,
+        sessionStartElapsedSeconds: 0,
         taskElapsedFocusSeconds,
+        taskSeedSeconds: taskElapsedFocusSeconds,
+        taskAnchorElapsedSeconds: elapsedSeconds(clock, now),
       });
 
       // Recompute activeSubtaskIndex and isExtraTime from restored elapsed
@@ -932,14 +1103,12 @@ export const useTimerStore = create<TimerState & TimerActions>((set, get) => ({
         }
       }
 
-      // Auto-resume if was running
+      // Auto-resume if it was running when the app closed
       if (status === "running" && secondsRemaining > 0) {
-        const sessionId = crypto.randomUUID();
-        const now = new Date().toISOString();
-        await dbCreateSession(sessionId, activeTaskId, phaseToSessionType(phase), now);
-        set({ status: "running", activeSessionId: sessionId });
-        startInterval();
+        await get().resume();
+      } else {
         await get().persistState();
+        await get().broadcastCurrentState();
       }
     } catch (e) {
       console.error("loadPersistedTimer failed:", e);
