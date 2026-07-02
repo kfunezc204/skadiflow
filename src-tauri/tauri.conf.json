@@ -33,6 +33,7 @@
         "decorations": false,
         "alwaysOnTop": true,
         "transparent": true,
+        "shadow": false,
         "visible": false,
         "skipTaskbar": true,
         "backgroundColor": [0, 0, 0, 0]
@@ -48,6 +49,7 @@
         "decorations": false,
         "alwaysOnTop": true,
         "transparent": true,
+        "shadow": false,
         "visible": false,
         "skipTaskbar": true,
         "backgroundColor": [0, 0, 0, 0]
